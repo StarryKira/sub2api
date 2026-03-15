@@ -233,34 +233,29 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	if lockable, ok := refresher.(LockableRefresher); ok && s.refreshLocker != nil {
 		lockKey := lockable.RefreshLockKey(account)
 		locked, lockErr := s.refreshLocker.AcquireRefreshLock(ctx, lockKey, 60*time.Second)
-		switch {
-		case lockErr != nil:
-			// Redis 不可用，降级为无锁刷新
+
+		if lockErr != nil {
+			// Redis 不可用，降级为无锁刷新，仍从 DB 重读以减小快照过期窗口
 			slog.Warn("token_refresh.acquire_lock_error_degraded",
 				"account_id", account.ID, "error", lockErr,
 			)
-		case locked:
-			defer func() { _ = s.refreshLocker.ReleaseRefreshLock(ctx, lockKey) }()
-		default:
-			// 锁被 TokenProvider 持有（正在内联刷新），等待后重新检查
-			time.Sleep(500 * time.Millisecond)
-		}
-
-		// 无论锁状态如何，从 DB 重读最新账号，避免使用周期开始时的快照数据，
-		// 确保使用的是当前有效的 refresh_token 而非过期快照。
-		if fresh, err := s.accountRepo.GetByID(ctx, account.ID); err == nil && fresh != nil {
-			*account = *fresh
-		}
-
-		// 锁被其他 worker 持有时，检查 token 是否已被 TokenProvider 刷新，若是则安全跳过
-		if lockErr == nil && !locked {
-			refreshWindow := time.Duration(s.cfg.RefreshBeforeExpiryHours * float64(time.Hour))
-			if !refresher.NeedsRefresh(account, refreshWindow) {
-				slog.Debug("token_refresh.skipped_already_refreshed_by_provider",
-					"account_id", account.ID,
-				)
-				return nil
+			if fresh, err := s.accountRepo.GetByID(ctx, account.ID); err == nil && fresh != nil {
+				*account = *fresh
 			}
+		} else if locked {
+			// 拿到锁：从 DB 重读最新账号，确保使用当前有效的 refresh_token 而非快照
+			defer func() { _ = s.refreshLocker.ReleaseRefreshLock(ctx, lockKey) }()
+			if fresh, err := s.accountRepo.GetByID(ctx, account.ID); err == nil && fresh != nil {
+				*account = *fresh
+			}
+		} else {
+			// 锁被 TokenProvider 持有（正在内联刷新）：本轮跳过，让下一个周期重新评估。
+			// 不能继续执行——即使等待后 NeedsRefresh 仍为 true，此时 TokenProvider 可能尚未
+			// 提交新凭证，并发刷新会再次消耗同一个一次性 refresh_token。
+			slog.Debug("token_refresh.skipped_lock_held_by_provider",
+				"account_id", account.ID,
+			)
+			return nil
 		}
 	}
 

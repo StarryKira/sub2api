@@ -37,6 +37,12 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
+// ProvideRefreshLocker adapts GeminiTokenCache to the narrow RefreshLocker interface.
+// TokenRefreshService 只需要锁操作，通过此函数明确依赖边界，避免暴露 Get/Set/Delete token 方法。
+func ProvideRefreshLocker(cache GeminiTokenCache) RefreshLocker {
+	return cache
+}
+
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
@@ -51,7 +57,7 @@ func ProvideTokenRefreshService(
 	tempUnschedCache TempUnschedCache,
 	privacyClientFactory PrivacyClientFactory,
 	proxyRepo ProxyRepository,
-	refreshLocker GeminiTokenCache, // 与 ClaudeTokenProvider 共享同一把 Redis 锁，防止并发消耗 refresh_token
+	refreshLocker RefreshLocker, // 与 ClaudeTokenProvider 共享同一把 Redis 锁，防止并发消耗 refresh_token
 ) *TokenRefreshService {
 	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache)
 	// 注入 Sora 账号扩展表仓储，用于 OpenAI Token 刷新时同步 sora_accounts 表
@@ -409,6 +415,7 @@ var ProviderSet = wire.NewSet(
 	NewIdentityService,
 	NewCRSSyncService,
 	ProvideUpdateService,
+	ProvideRefreshLocker,
 	ProvideTokenRefreshService,
 	ProvideAccountExpiryService,
 	ProvideSubscriptionExpiryService,

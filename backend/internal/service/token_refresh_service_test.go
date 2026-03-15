@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,8 +18,14 @@ type tokenRefreshAccountRepo struct {
 	updateCalls    int
 	setErrorCalls  int
 	clearTempCalls int
+	getByIDCalls   int
 	lastAccount    *Account
 	updateErr      error
+}
+
+func (r *tokenRefreshAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.getByIDCalls++
+	return r.mockAccountRepoForGemini.GetByID(ctx, id)
 }
 
 func (r *tokenRefreshAccountRepo) Update(ctx context.Context, account *Account) error {
@@ -34,6 +41,52 @@ func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorM
 
 func (r *tokenRefreshAccountRepo) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	r.clearTempCalls++
+	return nil
+}
+
+// lockableRefresherStub implements TokenRefresher + LockableRefresher for distributed lock tests.
+type lockableRefresherStub struct {
+	creds          map[string]any
+	refreshErr     error
+	lockKey        string
+	needsRefreshFn func(account *Account) bool // nil → always true
+	refreshCalls   int
+}
+
+func (r *lockableRefresherStub) CanRefresh(*Account) bool { return true }
+
+func (r *lockableRefresherStub) NeedsRefresh(account *Account, _ time.Duration) bool {
+	if r.needsRefreshFn != nil {
+		return r.needsRefreshFn(account)
+	}
+	return true
+}
+
+func (r *lockableRefresherStub) RefreshLockKey(*Account) string { return r.lockKey }
+
+func (r *lockableRefresherStub) Refresh(_ context.Context, _ *Account) (map[string]any, error) {
+	r.refreshCalls++
+	if r.refreshErr != nil {
+		return nil, r.refreshErr
+	}
+	return r.creds, nil
+}
+
+// refreshLockerStub implements RefreshLocker for unit tests.
+type refreshLockerStub struct {
+	locked       bool
+	acquireErr   error
+	acquireCalls int
+	releaseCalls int
+}
+
+func (s *refreshLockerStub) AcquireRefreshLock(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	s.acquireCalls++
+	return s.locked, s.acquireErr
+}
+
+func (s *refreshLockerStub) ReleaseRefreshLock(_ context.Context, _ string) error {
+	s.releaseCalls++
 	return nil
 }
 
@@ -386,7 +439,7 @@ func TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable(t *testing
 	err := service.refreshWithRetry(context.Background(), account, refresher)
 	require.NoError(t, err)
 	require.Equal(t, 1, repo.updateCalls)
-	require.Equal(t, 1, repo.clearTempCalls)  // DB 清除
+	require.Equal(t, 1, repo.clearTempCalls)   // DB 清除
 	require.Equal(t, 1, tempCache.deleteCalls) // Redis 缓存也应清除
 }
 
@@ -427,6 +480,140 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms(t *t
 			require.Equal(t, 1, repo.setErrorCalls) // 所有平台不可重试错误都应 SetError
 		})
 	}
+}
+
+// --- 分布式锁协调路径测试 ---
+
+// TestTokenRefreshService_Lock_Acquired_RefreshProceeds
+// (a) 成功获取锁 → 从 DB 重读账号，继续执行刷新
+func TestTokenRefreshService_Lock_Acquired_RefreshProceeds(t *testing.T) {
+	const accountID = int64(100)
+	freshAccount := &Account{
+		ID:          accountID,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "db-latest-rtoken"},
+	}
+	repo := &tokenRefreshAccountRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{accountID: freshAccount},
+		},
+	}
+	locker := &refreshLockerStub{locked: true}
+	cfg := &config.Config{TokenRefresh: config.TokenRefreshConfig{MaxRetries: 1}}
+	svc := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	svc.SetRefreshLocker(locker)
+
+	refresher := &lockableRefresherStub{
+		lockKey: "lock:account:100",
+		creds:   map[string]any{"access_token": "new-at", "refresh_token": "new-rt"},
+	}
+	account := &Account{
+		ID:          accountID,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "stale-snapshot-rtoken"},
+	}
+
+	err := svc.refreshWithRetry(context.Background(), account, refresher)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, locker.acquireCalls, "lock should be acquired once")
+	require.Equal(t, 1, locker.releaseCalls, "lock should be released via defer")
+	require.Equal(t, 1, repo.getByIDCalls, "account should be re-read from DB after acquiring lock")
+	require.Equal(t, 1, refresher.refreshCalls, "refresh should proceed")
+	require.Equal(t, 1, repo.updateCalls, "new credentials should be saved")
+}
+
+// TestTokenRefreshService_Lock_Held_SkipsRefresh
+// (b) 锁被 TokenProvider 持有 → 重读 DB，跳过刷新（即使 NeedsRefresh 仍为 true）
+func TestTokenRefreshService_Lock_Held_SkipsRefresh(t *testing.T) {
+	const accountID = int64(101)
+	// DB 中账号已被 TokenProvider 刷新，expires_at 设为远期（NeedsRefresh 将返回 false）
+	farFuture := time.Now().Add(2 * time.Hour).Unix()
+	freshAccount := &Account{
+		ID:       accountID,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token": "provider-refreshed-rtoken",
+			"expires_at":    fmt.Sprintf("%d", farFuture),
+		},
+	}
+	repo := &tokenRefreshAccountRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{accountID: freshAccount},
+		},
+	}
+	// locked=false, acquireErr=nil → lock held by another worker
+	locker := &refreshLockerStub{locked: false, acquireErr: nil}
+	cfg := &config.Config{TokenRefresh: config.TokenRefreshConfig{MaxRetries: 1}}
+	svc := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	svc.SetRefreshLocker(locker)
+
+	refresher := &lockableRefresherStub{
+		lockKey: "lock:account:101",
+		creds:   map[string]any{"access_token": "should-not-be-used"},
+	}
+	account := &Account{
+		ID:       accountID,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token": "stale-rtoken",
+			"expires_at":    "0",
+		},
+	}
+
+	err := svc.refreshWithRetry(context.Background(), account, refresher)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, locker.acquireCalls)
+	require.Equal(t, 0, locker.releaseCalls, "lock was never held, no release needed")
+	require.Equal(t, 0, repo.getByIDCalls, "DB re-read skipped when lock is held")
+	require.Equal(t, 0, refresher.refreshCalls, "refresh must be skipped when lock is held")
+	require.Equal(t, 0, repo.updateCalls)
+}
+
+// TestTokenRefreshService_Lock_Error_DegradedRefreshProceeds
+// (c) 获取锁时 Redis 报错 → 降级为无锁刷新，先从 DB 重读再继续
+func TestTokenRefreshService_Lock_Error_DegradedRefreshProceeds(t *testing.T) {
+	const accountID = int64(102)
+	freshAccount := &Account{
+		ID:          accountID,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "db-rtoken"},
+	}
+	repo := &tokenRefreshAccountRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{accountID: freshAccount},
+		},
+	}
+	locker := &refreshLockerStub{acquireErr: errors.New("redis: connection refused")}
+	cfg := &config.Config{TokenRefresh: config.TokenRefreshConfig{MaxRetries: 1}}
+	svc := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	svc.SetRefreshLocker(locker)
+
+	refresher := &lockableRefresherStub{
+		lockKey: "lock:account:102",
+		creds:   map[string]any{"access_token": "new-at"},
+	}
+	account := &Account{
+		ID:          accountID,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "stale-rtoken"},
+	}
+
+	err := svc.refreshWithRetry(context.Background(), account, refresher)
+
+	require.NoError(t, err, "lock error should degrade gracefully, not fail the refresh")
+	require.Equal(t, 1, locker.acquireCalls)
+	require.Equal(t, 0, locker.releaseCalls, "lock was not acquired, no release")
+	require.Equal(t, 1, repo.getByIDCalls, "DB should be re-read even on lock error to reduce stale-snapshot window")
+	require.Equal(t, 1, refresher.refreshCalls, "refresh should proceed in degraded mode")
+	require.Equal(t, 1, repo.updateCalls)
 }
 
 // TestIsNonRetryableRefreshError 测试不可重试错误判断
