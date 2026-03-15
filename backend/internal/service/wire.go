@@ -37,10 +37,10 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
-// ProvideRefreshLocker adapts GeminiTokenCache to the narrow RefreshLocker interface.
+// ProvideRefreshLocker supplies the narrow RefreshLocker dependency.
 // TokenRefreshService 只需要锁操作，通过此函数明确依赖边界，避免暴露 Get/Set/Delete token 方法。
-func ProvideRefreshLocker(cache GeminiTokenCache) RefreshLocker {
-	return cache
+func ProvideRefreshLocker(locker RefreshLocker) RefreshLocker {
+	return locker
 }
 
 // ProvideTokenRefreshService creates and starts TokenRefreshService
