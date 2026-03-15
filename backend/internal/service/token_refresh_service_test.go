@@ -526,10 +526,11 @@ func TestTokenRefreshService_Lock_Acquired_RefreshProceeds(t *testing.T) {
 }
 
 // TestTokenRefreshService_Lock_Held_SkipsRefresh
-// (b) 锁被 TokenProvider 持有 → 重读 DB，跳过刷新（即使 NeedsRefresh 仍为 true）
+// (b) 锁被 TokenProvider 持有 → 不重读 DB，直接跳过刷新（即使 NeedsRefresh 仍为 true）
 func TestTokenRefreshService_Lock_Held_SkipsRefresh(t *testing.T) {
 	const accountID = int64(101)
-	// DB 中账号已被 TokenProvider 刷新，expires_at 设为远期（NeedsRefresh 将返回 false）
+	// 场景假设：DB 中账号其实已被 TokenProvider 刷新，expires_at 设为远期
+	// （如果此时重读 DB，NeedsRefresh 将返回 false，但实现选择在锁被占用时不重读 DB）
 	farFuture := time.Now().Add(2 * time.Hour).Unix()
 	freshAccount := &Account{
 		ID:       accountID,
