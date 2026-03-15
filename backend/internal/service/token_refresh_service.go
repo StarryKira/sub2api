@@ -11,6 +11,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
+// RefreshLocker 分布式锁接口，用于 TokenRefreshService 与 TokenProvider 协调刷新时序，
+// 防止两个刷新入口并发消耗同一个一次性 refresh_token。
+type RefreshLocker interface {
+	AcquireRefreshLock(ctx context.Context, cacheKey string, ttl time.Duration) (bool, error)
+	ReleaseRefreshLock(ctx context.Context, cacheKey string) error
+}
+
 // TokenRefreshService OAuth token自动刷新服务
 // 定期检查并刷新即将过期的token
 type TokenRefreshService struct {
@@ -20,6 +27,7 @@ type TokenRefreshService struct {
 	cacheInvalidator TokenCacheInvalidator
 	schedulerCache   SchedulerCache   // 用于同步更新调度器缓存，解决 token 刷新后缓存不一致问题
 	tempUnschedCache TempUnschedCache // 用于清除 Redis 中的临时不可调度缓存
+	refreshLocker    RefreshLocker    // 分布式锁，与 TokenProvider 共享，防止并发消耗 refresh_token
 
 	// OpenAI privacy: 刷新成功后检查并设置 training opt-out
 	privacyClientFactory PrivacyClientFactory
@@ -80,6 +88,13 @@ func (s *TokenRefreshService) SetSoraAccountRepo(repo SoraAccountRepository) {
 func (s *TokenRefreshService) SetPrivacyDeps(factory PrivacyClientFactory, proxyRepo ProxyRepository) {
 	s.privacyClientFactory = factory
 	s.proxyRepo = proxyRepo
+}
+
+// SetRefreshLocker 注入分布式锁，与 ClaudeTokenProvider 共享同一把 Redis 锁，
+// 防止后台定时刷新与请求时内联刷新并发消耗一次性 refresh_token。
+// 需在 Start() 之前调用。
+func (s *TokenRefreshService) SetRefreshLocker(locker RefreshLocker) {
+	s.refreshLocker = locker
 }
 
 // Start 启动后台刷新服务
@@ -213,6 +228,42 @@ func (s *TokenRefreshService) listActiveAccounts(ctx context.Context) ([]Account
 
 // refreshWithRetry 带重试的刷新
 func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Account, refresher TokenRefresher) error {
+	// 如果 refresher 支持分布式锁，与 ClaudeTokenProvider 协调，防止并发消耗一次性 refresh_token。
+	// Anthropic refresh_token 使用后立即失效，两个入口同时刷新会导致其中一个得到 invalid_grant。
+	if lockable, ok := refresher.(LockableRefresher); ok && s.refreshLocker != nil {
+		lockKey := lockable.RefreshLockKey(account)
+		locked, lockErr := s.refreshLocker.AcquireRefreshLock(ctx, lockKey, 60*time.Second)
+		switch {
+		case lockErr != nil:
+			// Redis 不可用，降级为无锁刷新
+			slog.Warn("token_refresh.acquire_lock_error_degraded",
+				"account_id", account.ID, "error", lockErr,
+			)
+		case locked:
+			defer func() { _ = s.refreshLocker.ReleaseRefreshLock(ctx, lockKey) }()
+		default:
+			// 锁被 TokenProvider 持有（正在内联刷新），等待后重新检查
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// 无论锁状态如何，从 DB 重读最新账号，避免使用周期开始时的快照数据，
+		// 确保使用的是当前有效的 refresh_token 而非过期快照。
+		if fresh, err := s.accountRepo.GetByID(ctx, account.ID); err == nil && fresh != nil {
+			*account = *fresh
+		}
+
+		// 锁被其他 worker 持有时，检查 token 是否已被 TokenProvider 刷新，若是则安全跳过
+		if lockErr == nil && !locked {
+			refreshWindow := time.Duration(s.cfg.RefreshBeforeExpiryHours * float64(time.Hour))
+			if !refresher.NeedsRefresh(account, refreshWindow) {
+				slog.Debug("token_refresh.skipped_already_refreshed_by_provider",
+					"account_id", account.ID,
+				)
+				return nil
+			}
+		}
+	}
+
 	var lastErr error
 
 	for attempt := 1; attempt <= s.cfg.MaxRetries; attempt++ {

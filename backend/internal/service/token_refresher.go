@@ -21,6 +21,14 @@ type TokenRefresher interface {
 	Refresh(ctx context.Context, account *Account) (map[string]any, error)
 }
 
+// LockableRefresher 可选接口，供 TokenRefresher 提供分布式锁 key
+// TokenRefreshService 通过类型断言检测此接口，与 TokenProvider 共享同一把锁，
+// 防止两个刷新入口并发消耗一次性 refresh_token。
+type LockableRefresher interface {
+	// RefreshLockKey 返回此账号对应的 Redis 分布式锁 key
+	RefreshLockKey(account *Account) string
+}
+
 // ClaudeTokenRefresher 处理Anthropic/Claude OAuth token刷新
 type ClaudeTokenRefresher struct {
 	oauthService *OAuthService
@@ -49,6 +57,12 @@ func (r *ClaudeTokenRefresher) NeedsRefresh(account *Account, refreshWindow time
 		return false
 	}
 	return time.Until(*expiresAt) < refreshWindow
+}
+
+// RefreshLockKey 返回此账号的 Redis 锁 key，与 ClaudeTokenProvider.GetAccessToken 共享同一把锁，
+// 确保后台刷新任务与请求时内联刷新互斥，防止并发消耗一次性 refresh_token。
+func (r *ClaudeTokenRefresher) RefreshLockKey(account *Account) string {
+	return ClaudeTokenCacheKey(account)
 }
 
 // Refresh 执行token刷新
