@@ -162,7 +162,11 @@ func ProvideTimingWheelService() (*TimingWheelService, error) {
 	return svc, nil
 }
 
-// ProvideDeferredService creates and starts DeferredService
+// ProvideIdentityService creates an IdentityService with AccountRepository as the extra updater.
+func ProvideIdentityService(cache IdentityCache, accountRepo AccountRepository) *IdentityService {
+	return NewIdentityService(cache, accountRepo)
+}
+
 func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWheelService) *DeferredService {
 	svc := NewDeferredService(accountRepo, timingWheel, 10*time.Second)
 	svc.Start()
@@ -467,7 +471,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUserMessageQueueService,
 	NewUsageRecordWorkerPool,
 	ProvideSchedulerSnapshotService,
-	NewIdentityService,
+	ProvideIdentityService,
 	NewCRSSyncService,
 	ProvideUpdateService,
 	ProvideTokenRefreshService,

@@ -4166,7 +4166,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 		normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: true}
 		if s.identityService != nil {
-			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
+			fp, _, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header, account)
 			if err == nil && fp != nil {
 				// metadata 透传开启时跳过 metadata 注入
 				_, mimicMPT := s.settingService.GetGatewayForwardingSettings(ctx)
@@ -5720,8 +5720,8 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		enableFP, enableMPT = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	if account.IsOAuth() && s.identityService != nil {
-		// 1. 获取或创建指纹（包含随机生成的ClientID）
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		// 1. 获取或创建指纹（包含持久化的 device_id 和多样化 profile）
+		fp, isNewDevice, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders, account)
 		if err != nil {
 			logger.LegacyPrintf("service.gateway", "Warning: failed to get fingerprint for account %d: %v", account.ID, err)
 			// 失败时降级为透传原始headers
@@ -5740,6 +5740,11 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 						body = newBody
 					}
 				}
+			}
+
+			// 3. 首次 device_id 生成时，异步发送 Claude Code 启动探测
+			if isNewDevice {
+				go s.simulateStartupProbe(context.Background(), account, fp)
 			}
 		}
 	}
@@ -6242,6 +6247,70 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
 	if isStream {
 		setHeaderRaw(req.Header, "x-stainless-helper-method", "stream")
 	}
+}
+
+// simulateStartupProbe 模拟 Claude Code 启动时的连通性探测请求。
+// 真实 Claude Code 在启动时发送 max_tokens=1 + haiku 的非流式请求来验证 API 连接。
+// 此方法在新 device_id 首次生成后异步调用，让 Anthropic 服务端关联 device_id 与 OAuth token。
+func (s *GatewayService) simulateStartupProbe(ctx context.Context, account *Account, fp *Fingerprint) {
+	if account == nil || fp == nil {
+		return
+	}
+
+	token, tokenType, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		logger.LegacyPrintf("service.gateway", "Startup probe: failed to get token for account %d: %v", account.ID, err)
+		return
+	}
+
+	accountUUID := account.GetExtraString("account_uuid")
+	sessionID := generateRandomUUID()
+	version := ExtractCLIVersion(fp.UserAgent)
+	metadataUserID := FormatMetadataUserID(fp.ClientID, accountUUID, sessionID, version)
+
+	probeBody := fmt.Sprintf(`{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":%q}}`, metadataUserID)
+
+	probeURL := "https://api.anthropic.com/v1/messages?beta=true"
+	req, err := http.NewRequestWithContext(ctx, "POST", probeURL, strings.NewReader(probeBody))
+	if err != nil {
+		logger.LegacyPrintf("service.gateway", "Startup probe: failed to create request for account %d: %v", account.ID, err)
+		return
+	}
+
+	// 认证头
+	if tokenType == "oauth" {
+		setHeaderRaw(req.Header, "authorization", "Bearer "+token)
+	} else {
+		setHeaderRaw(req.Header, "x-api-key", token)
+	}
+
+	// 基础头
+	setHeaderRaw(req.Header, "content-type", "application/json")
+	setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
+	setHeaderRaw(req.Header, "anthropic-beta", claude.HaikuBetaHeader)
+	setHeaderRaw(req.Header, "Accept", "application/json")
+	setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", sessionID)
+
+	// 应用指纹头（User-Agent, X-Stainless-*）
+	s.identityService.ApplyFingerprint(req, fp)
+
+	// 补充 DefaultHeaders 中 ApplyFingerprint 未覆盖的静态头
+	for key, value := range claude.DefaultHeaders {
+		if getHeaderRaw(req.Header, key) == "" && value != "" {
+			setHeaderRaw(req.Header, resolveWireCasing(key), value)
+		}
+	}
+
+	resp, err := s.httpUpstream.Do(req, "", account.ID, account.Concurrency)
+	if err != nil {
+		logger.LegacyPrintf("service.gateway", "Startup probe: request failed for account %d: %v", account.ID, err)
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	logger.LegacyPrintf("service.gateway", "Startup probe: completed for account %d, status=%d, device_id=%s",
+		account.ID, resp.StatusCode, fp.ClientID[:min(16, len(fp.ClientID))]+"...")
 }
 
 func truncateForLog(b []byte, maxBytes int) string {
@@ -8459,7 +8528,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 	var ctFingerprint *Fingerprint
 	if account.IsOAuth() && s.identityService != nil {
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		fp, _, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders, account)
 		if err == nil {
 			ctFingerprint = fp
 			if !ctEnableMPT {

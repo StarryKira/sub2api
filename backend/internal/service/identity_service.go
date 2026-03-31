@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -24,15 +25,10 @@ var (
 	userAgentVersionRegex = regexp.MustCompile(`/(\d+)\.(\d+)\.(\d+)`)
 )
 
-// 默认指纹值（当客户端未提供时使用）
-var defaultFingerprint = Fingerprint{
-	UserAgent:               "claude-cli/2.1.22 (external, cli)",
-	StainlessLang:           "js",
-	StainlessPackageVersion: "0.70.0",
-	StainlessOS:             "Linux",
-	StainlessArch:           "arm64",
-	StainlessRuntime:        "node",
-	StainlessRuntimeVersion: "v24.13.0",
+// AccountExtraUpdater 用于将 device_id 和指纹 profile 持久化到 Account.Extra。
+// 由 AccountRepository 实现。
+type AccountExtraUpdater interface {
+	UpdateExtra(ctx context.Context, accountID int64, updates map[string]any) error
 }
 
 // Fingerprint represents account fingerprint data
@@ -63,33 +59,38 @@ type IdentityCache interface {
 
 // IdentityService 管理OAuth账号的请求身份指纹
 type IdentityService struct {
-	cache IdentityCache
+	cache        IdentityCache
+	extraUpdater AccountExtraUpdater
 }
 
 // NewIdentityService 创建新的IdentityService
-func NewIdentityService(cache IdentityCache) *IdentityService {
-	return &IdentityService{cache: cache}
+func NewIdentityService(cache IdentityCache, extraUpdater AccountExtraUpdater) *IdentityService {
+	return &IdentityService{cache: cache, extraUpdater: extraUpdater}
 }
 
-// GetOrCreateFingerprint 获取或创建账号的指纹
-// 如果缓存存在，检测user-agent版本，新版本则更新
-// 如果缓存不存在，生成随机ClientID并从请求头创建指纹，然后缓存
-func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID int64, headers http.Header) (*Fingerprint, error) {
-	// 尝试从缓存获取指纹
-	cached, err := s.cache.GetFingerprint(ctx, accountID)
-	if err == nil && cached != nil {
+// GetOrCreateFingerprint 获取或创建账号的指纹。
+//
+// 优先级：
+//  1. Redis 缓存（热路径）
+//  2. Account.Extra["device_id"]（持久化的 device_id）
+//  3. 全新生成（并持久化到 DB + Redis）
+//
+// account 参数用于读取 Extra 中持久化的 device_id 和 fingerprint_profile_index。
+// 如果 account 为 nil，行为与旧版本一致（仅依赖 Redis 缓存）。
+//
+// 返回值 isNewDevice 为 true 表示 device_id 是首次生成的，调用方应考虑执行启动探测。
+func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID int64, headers http.Header, account *Account) (fp *Fingerprint, isNewDevice bool, err error) {
+	// 1. 尝试从 Redis 缓存获取
+	cached, cacheErr := s.cache.GetFingerprint(ctx, accountID)
+	if cacheErr == nil && cached != nil {
 		needWrite := false
 
-		// 检查客户端的user-agent是否是更新版本
 		clientUA := headers.Get("User-Agent")
 		if clientUA != "" && isNewerVersion(clientUA, cached.UserAgent) {
-			// 版本升级：merge 语义 — 仅更新请求中实际携带的字段，保留缓存值
-			// 避免缺失的头被硬编码默认值覆盖（如新 CLI 版本 + 旧 SDK 默认值的不一致）
 			mergeHeadersIntoFingerprint(cached, headers)
 			needWrite = true
 			logger.LegacyPrintf("service.identity", "Updated fingerprint for account %d: %s (merge update)", accountID, clientUA)
 		} else if time.Since(time.Unix(cached.UpdatedAt, 0)) > 24*time.Hour {
-			// 距上次写入超过24小时，续期TTL
 			needWrite = true
 		}
 
@@ -99,45 +100,94 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 				logger.LegacyPrintf("service.identity", "Warning: failed to refresh fingerprint for account %d: %v", accountID, err)
 			}
 		}
-		return cached, nil
+		return cached, false, nil
 	}
 
-	// 缓存不存在或解析失败，创建新指纹
-	fp := s.createFingerprintFromHeaders(headers)
+	// 2. Redis 缓存 miss — 尝试从 Account.Extra 恢复持久化的 device_id
+	var persistedDeviceID string
+	profileIndex := -1
+	if account != nil {
+		persistedDeviceID = account.GetExtraString("device_id")
+		if v, ok := account.Extra["fingerprint_profile_index"]; ok {
+			switch n := v.(type) {
+			case float64:
+				profileIndex = int(n)
+			case int:
+				profileIndex = n
+			case int64:
+				profileIndex = int(n)
+			}
+		}
+	}
 
-	// 生成随机ClientID
-	fp.ClientID = generateClientID()
-	fp.UpdatedAt = time.Now().Unix()
+	// 3. 创建指纹
+	newFP, selectedProfileIndex := s.createFingerprintFromHeaders(headers, accountID, profileIndex)
 
-	// 保存到缓存（7天TTL，每24小时自动续期）
-	if err := s.cache.SetFingerprint(ctx, accountID, fp); err != nil {
+	if persistedDeviceID != "" {
+		newFP.ClientID = persistedDeviceID
+		isNewDevice = false
+		logger.LegacyPrintf("service.identity", "Restored device_id from DB for account %d: %s", accountID, persistedDeviceID[:min(16, len(persistedDeviceID))]+"...")
+	} else {
+		newFP.ClientID = generateClientID()
+		isNewDevice = true
+		logger.LegacyPrintf("service.identity", "Generated new device_id for account %d: %s", accountID, newFP.ClientID[:min(16, len(newFP.ClientID))]+"...")
+
+		s.persistDeviceID(ctx, accountID, newFP.ClientID, selectedProfileIndex, account)
+	}
+
+	newFP.UpdatedAt = time.Now().Unix()
+
+	// 写回 Redis 缓存
+	if err := s.cache.SetFingerprint(ctx, accountID, newFP); err != nil {
 		logger.LegacyPrintf("service.identity", "Warning: failed to cache fingerprint for account %d: %v", accountID, err)
 	}
 
-	logger.LegacyPrintf("service.identity", "Created new fingerprint for account %d with client_id: %s", accountID, fp.ClientID)
-	return fp, nil
+	return newFP, isNewDevice, nil
 }
 
-// createFingerprintFromHeaders 从请求头创建指纹
-func (s *IdentityService) createFingerprintFromHeaders(headers http.Header) *Fingerprint {
+// persistDeviceID 将 device_id 和 fingerprint_profile_index 持久化到 Account.Extra。
+// profileIndex 来自 SelectProfileForAccount 的结果，用于锁定 profile 选择以防模板池变化。
+func (s *IdentityService) persistDeviceID(ctx context.Context, accountID int64, deviceID string, profileIndex int, account *Account) {
+	if s.extraUpdater == nil {
+		return
+	}
+
+	updates := map[string]any{
+		"device_id": deviceID,
+	}
+
+	if account == nil || account.Extra == nil || account.Extra["fingerprint_profile_index"] == nil {
+		updates["fingerprint_profile_index"] = profileIndex
+	}
+
+	if err := s.extraUpdater.UpdateExtra(ctx, accountID, updates); err != nil {
+		logger.LegacyPrintf("service.identity", "Warning: failed to persist device_id for account %d: %v", accountID, err)
+	}
+}
+
+// createFingerprintFromHeaders 从请求头创建指纹。
+// 当客户端 headers 缺失时（mimic 场景），使用基于 accountID 选择的多样化 profile。
+// profileIndex >= 0 时使用持久化的 profile 索引，否则由 hash(accountID) 确定。
+// createFingerprintFromHeaders 从请求头创建指纹，返回指纹和选中的 profile index。
+func (s *IdentityService) createFingerprintFromHeaders(headers http.Header, accountID int64, profileIndex int) (*Fingerprint, int) {
+	sel := claude.SelectProfileForAccount(accountID, profileIndex)
+
 	fp := &Fingerprint{}
 
-	// 获取User-Agent
 	if ua := headers.Get("User-Agent"); ua != "" {
 		fp.UserAgent = ua
 	} else {
-		fp.UserAgent = defaultFingerprint.UserAgent
+		fp.UserAgent = sel.UserAgent
 	}
 
-	// 获取x-stainless-*头，如果没有则使用默认值
-	fp.StainlessLang = getHeaderOrDefault(headers, "X-Stainless-Lang", defaultFingerprint.StainlessLang)
-	fp.StainlessPackageVersion = getHeaderOrDefault(headers, "X-Stainless-Package-Version", defaultFingerprint.StainlessPackageVersion)
-	fp.StainlessOS = getHeaderOrDefault(headers, "X-Stainless-OS", defaultFingerprint.StainlessOS)
-	fp.StainlessArch = getHeaderOrDefault(headers, "X-Stainless-Arch", defaultFingerprint.StainlessArch)
-	fp.StainlessRuntime = getHeaderOrDefault(headers, "X-Stainless-Runtime", defaultFingerprint.StainlessRuntime)
-	fp.StainlessRuntimeVersion = getHeaderOrDefault(headers, "X-Stainless-Runtime-Version", defaultFingerprint.StainlessRuntimeVersion)
+	fp.StainlessLang = getHeaderOrDefault(headers, "X-Stainless-Lang", "js")
+	fp.StainlessPackageVersion = getHeaderOrDefault(headers, "X-Stainless-Package-Version", sel.PackageVersion)
+	fp.StainlessOS = getHeaderOrDefault(headers, "X-Stainless-OS", sel.Profile.OS)
+	fp.StainlessArch = getHeaderOrDefault(headers, "X-Stainless-Arch", sel.Profile.Arch)
+	fp.StainlessRuntime = getHeaderOrDefault(headers, "X-Stainless-Runtime", sel.Profile.Runtime)
+	fp.StainlessRuntimeVersion = getHeaderOrDefault(headers, "X-Stainless-Runtime-Version", sel.RuntimeVersion)
 
-	return fp
+	return fp, sel.ProfileIndex
 }
 
 // mergeHeadersIntoFingerprint 将请求头中实际存在的字段合并到现有指纹中（用于版本升级场景）
