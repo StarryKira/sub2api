@@ -456,8 +456,13 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 				remaining = 0
 			}
 		}
+		utilization7d := util7d * 100
+		// 窗口已过期（resetAt 在 now 之前）→ 额度已重置，归零（与 buildCodexUsageProgressFromExtra 逻辑一致）
+		if resetAt != nil && !time.Now().Before(*resetAt) {
+			utilization7d = 0
+		}
 		info.SevenDay = &UsageProgress{
-			Utilization:      util7d * 100,
+			Utilization:      utilization7d,
 			ResetsAt:         resetAt,
 			RemainingSeconds: remaining,
 		}
@@ -530,14 +535,23 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		return usage, nil
 	}
 
-	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, now.Add(-5*time.Hour)); err == nil {
+	// 使用配额窗口的真实开始时间查询统计，确保统计数据与利用率百分比对齐
+	fiveHourStart := now.Add(-5 * time.Hour)
+	if usage.FiveHour != nil && usage.FiveHour.ResetsAt != nil {
+		fiveHourStart = usage.FiveHour.ResetsAt.Add(-5 * time.Hour)
+	}
+	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, fiveHourStart); err == nil {
 		if usage.FiveHour == nil {
 			usage.FiveHour = &UsageProgress{Utilization: 0}
 		}
 		usage.FiveHour.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
-	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, now.Add(-7*24*time.Hour)); err == nil {
+	sevenDayStart := now.Add(-7 * 24 * time.Hour)
+	if usage.SevenDay != nil && usage.SevenDay.ResetsAt != nil {
+		sevenDayStart = usage.SevenDay.ResetsAt.Add(-7 * 24 * time.Hour)
+	}
+	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, sevenDayStart); err == nil {
 		if usage.SevenDay == nil {
 			usage.SevenDay = &UsageProgress{Utilization: 0}
 		}
