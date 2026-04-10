@@ -1197,7 +1197,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	payload["type"] = "response.create"
 
 	// OAuth 默认保持 store=false，避免误依赖服务端历史。
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	// 若账号启用 openai_store_enabled 或 AllowStoreRecovery，则保留客户端 store 值。
+	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) && !account.IsOpenAIStoreEnabled() {
 		payload["store"] = false
 	}
 	return payload

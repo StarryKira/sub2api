@@ -987,6 +987,23 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 	return false
 }
 
+// IsOpenAIStoreEnabled 返回 OpenAI OAuth 账号是否允许上游存储响应（store=true）。
+//
+// 启用后，上游将存储每轮响应，客户端可通过 previous_response_id 在下一轮续链，
+// 避免每轮全量重发历史，大幅降低长会话 token 用量。
+//
+// 字段：accounts.extra.openai_store_enabled（bool）。
+// 默认 false 保持向后兼容（防止上游拒绝 store=true 时请求失败）。
+func (a *Account) IsOpenAIStoreEnabled() bool {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return false
+	}
+	if enabled, ok := a.Extra["openai_store_enabled"].(bool); ok {
+		return enabled
+	}
+	return false
+}
+
 // IsOpenAIResponsesWebSocketV2Enabled 返回 OpenAI 账号是否开启 Responses WebSocket v2。
 //
 // 分类型新字段：

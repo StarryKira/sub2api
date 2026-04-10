@@ -76,7 +76,7 @@ type codexTransformResult struct {
 	PromptCacheKey  string
 }
 
-func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact bool) codexTransformResult {
+func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact bool, storeEnabled bool) codexTransformResult {
 	result := codexTransformResult{}
 	// 工具续链需求会影响存储策略与 input 过滤逻辑。
 	needsToolContinuation := NeedsToolContinuation(reqBody)
@@ -104,11 +104,13 @@ func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact
 			result.Modified = true
 		}
 	} else {
-		// OAuth 走 ChatGPT internal API 时，store 必须为 false；显式 true 也会强制覆盖。
-		// 避免上游返回 "Store must be set to false"。
-		if v, ok := reqBody["store"].(bool); !ok || v {
-			reqBody["store"] = false
-			result.Modified = true
+		// OAuth 走 ChatGPT internal API 时，默认 store=false，避免上游拒绝。
+		// 若账号启用 openai_store_enabled，则保留客户端 store 值，允许上游存储响应以支持 previous_response_id 续链。
+		if !storeEnabled {
+			if v, ok := reqBody["store"].(bool); !ok || v {
+				reqBody["store"] = false
+				result.Modified = true
+			}
 		}
 		if v, ok := reqBody["stream"].(bool); !ok || !v {
 			reqBody["stream"] = true

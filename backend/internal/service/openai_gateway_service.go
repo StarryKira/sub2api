@@ -1849,6 +1849,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("openai ws v1 is temporarily unsupported; use ws v2")
 	}
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	storeEnabled := account.IsOpenAIStoreEnabled()
 	if passthroughEnabled {
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, reqModel)
@@ -1974,7 +1975,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	if account.Type == AccountTypeOAuth {
-		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c))
+		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c), account.IsOpenAIStoreEnabled())
 		if codexResult.Modified {
 			bodyModified = true
 			disablePatch()
@@ -2043,7 +2044,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	// 仅在 WSv2 模式保留 previous_response_id，其他模式（HTTP/WSv1）统一过滤。
 	// 注意：该规则同样适用于 Codex CLI 请求，避免 WSv1 向上游透传不支持字段。
-	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+	// 若账号启用 openai_store_enabled，HTTP 路径也保留 previous_response_id，以支持长会话 stored-response 续链。
+	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && !storeEnabled {
 		if _, has := reqBody["previous_response_id"]; has {
 			delete(reqBody, "previous_response_id")
 			bodyModified = true
@@ -2473,7 +2475,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
 		}
 
-		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
+		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c), account.IsOpenAIStoreEnabled())
 		if err != nil {
 			return nil, err
 		}
@@ -3226,6 +3228,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
 			req.Header.Set("conversation_id", isolated)
 			req.Header.Set("session_id", isolated)
+		} else if !isOpenAIResponsesCompactPath(c) {
+			// promptCacheKey 为空时，以客户端原始 session_id 作为兜底，
+			// 保证同一客户端跨请求命中相同 KV 缓存分区。
+			if clientSessionID := strings.TrimSpace(c.Request.Header.Get("session_id")); clientSessionID != "" {
+				isolated := isolateOpenAISessionID(apiKeyID, clientSessionID)
+				req.Header.Set("conversation_id", isolated)
+				req.Header.Set("session_id", isolated)
+			}
 		}
 	}
 
@@ -4918,8 +4928,10 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 }
 
 // normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛为旧链路关键行为：
-// 1) store=false 2) 非 compact 保持 stream=true；compact 强制 stream=false
-func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, bool, error) {
+// 非 compact：stream=true；compact：删除 store 与 stream。
+// 若 storeEnabled=false，非 compact 路径额外强制 store=false；
+// 若 storeEnabled=true，保留客户端 store 值以支持 previous_response_id 续链。
+func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool, storeEnabled bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
 	}
@@ -4945,13 +4957,15 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			changed = true
 		}
 	} else {
-		if store := gjson.GetBytes(normalized, "store"); !store.Exists() || store.Type != gjson.False {
-			next, err := sjson.SetBytes(normalized, "store", false)
-			if err != nil {
-				return body, false, fmt.Errorf("normalize passthrough body store=false: %w", err)
+		if !storeEnabled {
+			if store := gjson.GetBytes(normalized, "store"); !store.Exists() || store.Type != gjson.False {
+				next, err := sjson.SetBytes(normalized, "store", false)
+				if err != nil {
+					return body, false, fmt.Errorf("normalize passthrough body store=false: %w", err)
+				}
+				normalized = next
+				changed = true
 			}
-			normalized = next
-			changed = true
 		}
 		if stream := gjson.GetBytes(normalized, "stream"); !stream.Exists() || stream.Type != gjson.True {
 			next, err := sjson.SetBytes(normalized, "stream", true)
