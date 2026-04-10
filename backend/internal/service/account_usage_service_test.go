@@ -237,7 +237,7 @@ func TestGetPassiveUsage_ExpiredSevenDayWindowZeroesUtilization(t *testing.T) {
 		Platform: PlatformAnthropic,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"passive_usage_7d_utilization": 0.07,                                // 7%
+			"passive_usage_7d_utilization": 0.07, // 7%
 			"passive_usage_7d_reset":       float64(expiredReset.Unix()),
 		},
 	}
@@ -318,11 +318,11 @@ func TestGetOpenAIUsage_StatsStartTimeAlignedWithQuotaWindow(t *testing.T) {
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"codex_5h_used_percent":          1.0,
-			"codex_5h_reset_at":              fiveHourResetsAt.UTC().Format(time.RFC3339),
-			"codex_7d_used_percent":          7.0,
-			"codex_7d_reset_at":              sevenDayResetsAt.UTC().Format(time.RFC3339),
-			"codex_usage_updated_at":         now.UTC().Format(time.RFC3339),
+			"codex_5h_used_percent":  1.0,
+			"codex_5h_reset_at":      fiveHourResetsAt.UTC().Format(time.RFC3339),
+			"codex_7d_used_percent":  7.0,
+			"codex_7d_reset_at":      sevenDayResetsAt.UTC().Format(time.RFC3339),
+			"codex_usage_updated_at": now.UTC().Format(time.RFC3339),
 		},
 	}
 

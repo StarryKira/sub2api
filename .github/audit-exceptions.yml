@@ -28,3 +28,10 @@ exceptions:
     mitigation: "No user-controlled template strings; plan to migrate to native JS alternatives"
     expires_on: "2026-07-02"
     owner: "security@your-domain"
+  - package: axios
+    advisory: "GHSA-3p68-rc4w-qgx5"
+    severity: critical
+    reason: "NO_PROXY bypass only affects server-side Node.js environments; axios is used exclusively in the browser (frontend SPA) where NO_PROXY is not applicable"
+    mitigation: "All axios requests target the same-origin backend API; no user-controlled URLs or proxy configurations are involved"
+    expires_on: "2026-10-10"
+    owner: "security@your-domain"
