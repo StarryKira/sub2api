@@ -18,7 +18,13 @@ import (
 // Only Anthropic platform accounts (OAuth, SetupToken, APIKey) are synced —
 // clandes currently supports Claude only.
 func SyncAccountsToClandes(ctx context.Context, client *ClandesClient, accountService *AccountService) error {
-	accounts, err := accountService.ListByPlatform(ctx, PlatformAnthropic)
+	return SyncAccountsByRepo(ctx, client, accountService.accountRepo)
+}
+
+// SyncAccountsByRepo is like SyncAccountsToClandes but accepts AccountRepository directly.
+// Used during Wire DI wiring where *AccountService is not directly available.
+func SyncAccountsByRepo(ctx context.Context, client *ClandesClient, repo AccountRepository) error {
+	accounts, err := repo.ListByPlatform(ctx, PlatformAnthropic)
 	if err != nil {
 		return fmt.Errorf("clandes account sync: list accounts: %w", err)
 	}

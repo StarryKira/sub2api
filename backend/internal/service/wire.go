@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"time"
 
+	"go.uber.org/zap"
+
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
@@ -485,4 +487,39 @@ func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService) *PaymentOrderE
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.Start()
 	return svc
+}
+
+// ProvideClandesClient creates a ClandesClient when clandes integration is enabled,
+// connects to clandes, syncs accounts, and registers the billing Router callback.
+// Returns nil if clandes.enabled is false — callers must nil-check.
+func ProvideClandesClient(
+	cfg *config.Config,
+	gatewaySvc *GatewayService,
+	billingCacheSvc *BillingCacheService,
+	apiKeySvc *APIKeyService,
+	accountRepo AccountRepository,
+) *ClandesClient {
+	if !cfg.Clandes.Enabled {
+		return nil
+	}
+
+	client := NewClandesClient(
+		cfg.Clandes.Addr,
+		cfg.Clandes.AuthToken,
+		cfg.Clandes.ReconnectInterval,
+		gatewaySvc,
+		billingCacheSvc,
+		apiKeySvc,
+	)
+
+	syncFn := func(ctx context.Context, c *ClandesClient) error {
+		return SyncAccountsByRepo(ctx, c, accountRepo)
+	}
+
+	ctx := context.Background()
+	if err := client.Start(ctx, syncFn); err != nil {
+		logger.L().Error("clandes: failed to start client — clandes integration disabled", zap.Error(err))
+		return nil
+	}
+	return client
 }
