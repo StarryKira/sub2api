@@ -15,6 +15,7 @@ type clandesRequestContext struct {
 	Subscription *UserSubscription
 	GroupID      *int64
 	StartTime    time.Time
+	UserAgent    string
 }
 
 // clandesRequestCache is a short-lived cache bridging routeRequest and reportUsage calls.
