@@ -88,6 +88,9 @@ func RegisterAdminRoutes(
 
 		// 渠道管理
 		registerChannelRoutes(admin, h)
+
+		// Clandes 集成
+		registerClandesRoutes(admin, h)
 	}
 }
 
@@ -561,5 +564,13 @@ func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		channels.POST("", h.Admin.Channel.Create)
 		channels.PUT("/:id", h.Admin.Channel.Update)
 		channels.DELETE("/:id", h.Admin.Channel.Delete)
+	}
+}
+
+func registerClandesRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	clandes := admin.Group("/clandes")
+	{
+		clandes.GET("/status", h.Admin.Clandes.GetStatus)
+		clandes.POST("/sync", h.Admin.Clandes.SyncAccounts)
 	}
 }

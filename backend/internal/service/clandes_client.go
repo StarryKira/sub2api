@@ -101,6 +101,25 @@ func (c *ClandesClient) Close() {
 	})
 }
 
+// ClandesStatus holds the current state of the clandes integration for API responses.
+type ClandesStatus struct {
+	Enabled   bool   `json:"enabled"`
+	Connected bool   `json:"connected"`
+	Addr      string `json:"addr"`
+}
+
+// Status returns the current connection status of the client.
+func (c *ClandesClient) Status() ClandesStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	connected := c.conn != nil && c.service.IsValid()
+	return ClandesStatus{
+		Enabled:   true,
+		Connected: connected,
+		Addr:      c.addr,
+	}
+}
+
 // AccountService returns the clandes AccountService client. Caller must call Release() when done.
 func (c *ClandesClient) AccountService() (proto.AccountService, error) {
 	c.mu.Lock()
