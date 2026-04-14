@@ -139,10 +139,21 @@
               <button type="button" class="btn btn-primary w-full" :disabled="oauthStarting" @click="doStartOAuth">
                 {{ oauthStarting ? t('common.loading') : t('admin.clandes.startOAuth') }}
               </button>
-              <!-- OAuth callback input (shown after redirect) -->
+              <!-- OAuth URL + code input (shown after getting URL) -->
               <div v-if="oauthSessionId" class="space-y-3">
-                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.clandes.oauthCodeHint') }}</p>
-                <input v-model="oauthCode" class="input w-full" :placeholder="t('admin.clandes.oauthCodePlaceholder')" />
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.clandes.oauthUrlHint') }}</label>
+                  <div class="flex gap-2">
+                    <input :value="oauthUrl" class="input w-full font-mono text-xs" readonly @click="($event.target as HTMLInputElement)?.select()" />
+                    <button type="button" class="btn btn-secondary btn-sm shrink-0" @click="copyUrl">
+                      {{ urlCopied ? t('admin.clandes.copied') : 'Copy' }}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.clandes.oauthCodeHint') }}</label>
+                  <input v-model="oauthCode" class="input w-full" :placeholder="t('admin.clandes.oauthCodePlaceholder')" />
+                </div>
                 <button type="button" class="btn btn-primary btn-sm w-full" :disabled="!oauthCode || oauthCompleting" @click="doCompleteOAuth">
                   {{ oauthCompleting ? t('common.loading') : t('admin.clandes.completeOAuth') }}
                 </button>
@@ -203,8 +214,10 @@ const deleting = ref<number | null>(null)
 const addMethod = ref<'oauth' | 'apikey'>('oauth')
 const oauthStarting = ref(false)
 const oauthSessionId = ref('')
+const oauthUrl = ref('')
 const oauthCode = ref('')
 const oauthCompleting = ref(false)
+const urlCopied = ref(false)
 
 const createForm = ref({
   name: '',
@@ -255,11 +268,21 @@ async function doStartOAuth() {
     const redirectUri = window.location.origin + '/admin/clandes'
     const result = await adminAPI.clandes.startOAuth(redirectUri)
     oauthSessionId.value = result.session_id
-    window.open(result.auth_url, '_blank')
+    oauthUrl.value = result.auth_url
   } catch (e) {
     appStore.showError((e as { message?: string })?.message ?? t('admin.clandes.oauthFailed'))
   } finally {
     oauthStarting.value = false
+  }
+}
+
+async function copyUrl() {
+  try {
+    await navigator.clipboard.writeText(oauthUrl.value)
+    urlCopied.value = true
+    setTimeout(() => { urlCopied.value = false }, 2000)
+  } catch {
+    appStore.showError('Failed to copy')
   }
 }
 
@@ -318,7 +341,9 @@ function resetForm() {
   createForm.value = { name: '', apiKey: '', baseUrl: '' }
   addMethod.value = 'oauth'
   oauthSessionId.value = ''
+  oauthUrl.value = ''
   oauthCode.value = ''
+  urlCopied.value = false
 }
 
 onMounted(() => {
