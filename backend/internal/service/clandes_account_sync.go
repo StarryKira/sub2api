@@ -21,8 +21,20 @@ func SyncAccountsToClandes(ctx context.Context, client *ClandesClient, accountSe
 	return SyncAccountsByRepo(ctx, client, accountService.accountRepo)
 }
 
+// IsClandesAccount returns true if the account is marked for clandes-only routing.
+// Clandes accounts have {"clandes": true} in their Extra JSONB field.
+// They are managed by clandes for TLS fingerprinting and OAuth refresh;
+// sub2api only handles routing decisions and billing.
+func IsClandesAccount(acc *Account) bool {
+	if acc.Extra == nil {
+		return false
+	}
+	v, ok := acc.Extra["clandes"].(bool)
+	return ok && v
+}
+
 // SyncAccountsByRepo is like SyncAccountsToClandes but accepts AccountRepository directly.
-// Used during Wire DI wiring where *AccountService is not directly available.
+// Only syncs accounts marked with {"clandes": true} in Extra.
 func SyncAccountsByRepo(ctx context.Context, client *ClandesClient, repo AccountRepository) error {
 	accounts, err := repo.ListByPlatform(ctx, PlatformAnthropic)
 	if err != nil {
@@ -40,7 +52,7 @@ func SyncAccountsByRepo(ctx context.Context, client *ClandesClient, repo Account
 
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.Status != "active" {
+		if acc.Status != "active" || !IsClandesAccount(acc) {
 			continue
 		}
 		if err := registerAccountToClandes(ctx, svc, acc); err != nil {
