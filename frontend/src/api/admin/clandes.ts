@@ -39,7 +39,7 @@ export async function startOAuth(
 ): Promise<OAuthStartResponse> {
   const { data } = await apiClient.post<OAuthStartResponse>('/admin/clandes/oauth/start', {
     redirect_uri: redirectUri,
-    ...(proxyId ? { proxy_id: proxyId } : {})
+    ...(proxyId != null ? { proxy_id: proxyId } : {})
   })
   return data
 }

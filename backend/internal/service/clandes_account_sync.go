@@ -86,7 +86,7 @@ func registerAccountToClandes(ctx context.Context, svc proto.AccountService, acc
 			return err
 		}
 		if acc.Proxy != nil {
-			if err := p.SetProxyUrl(buildProxyURL(acc.Proxy)); err != nil {
+			if err := p.SetProxyUrl(BuildProxyURL(acc.Proxy)); err != nil {
 				return err
 			}
 		}
@@ -198,7 +198,8 @@ func setAccountCredentials(creds proto.AccountCredentials, acc *Account) error {
 	return nil
 }
 
-func buildProxyURL(proxy *Proxy) string {
+// BuildProxyURL builds a raw proxy URL for clandes (no URL-encoding of credentials).
+func BuildProxyURL(proxy *Proxy) string {
 	if proxy == nil {
 		return ""
 	}

@@ -88,7 +88,10 @@ func (r *clandesRouterImpl) RouteRequest(ctx context.Context, call proto.Router_
 		return reject(403, err.Error())
 	}
 
-	// 3. Select account
+	// 3. Select account (set Claude Code client flag from User-Agent)
+	if claudeCodeUAPattern.MatchString(userAgent) {
+		ctx = SetClaudeCodeClient(ctx, true)
+	}
 	selection, err := r.gatewayService.SelectAccountWithLoadAwareness(
 		ctx,
 		apiKey.GroupID,

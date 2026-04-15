@@ -71,7 +71,7 @@ func (h *ClandesHandler) StartOAuthLogin(c *gin.Context) {
 	var proxyURL string
 	if req.ProxyID != nil {
 		if p, err := h.proxyRepo.GetByID(c.Request.Context(), *req.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
+			proxyURL = service.BuildProxyURL(p)
 		}
 	}
 	authURL, sessionID, err := h.client.StartOAuthLogin(c.Request.Context(), req.RedirectURI, proxyURL)

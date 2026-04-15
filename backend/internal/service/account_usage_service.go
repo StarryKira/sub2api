@@ -266,6 +266,7 @@ type AccountUsageService struct {
 	cache                   *UsageCache
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
+	clandesClient           *ClandesClient // may be nil
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -278,6 +279,7 @@ func NewAccountUsageService(
 	cache *UsageCache,
 	identityCache IdentityCache,
 	tlsFPProfileService *TLSFingerprintProfileService,
+	clandesClient *ClandesClient,
 ) *AccountUsageService {
 	return &AccountUsageService{
 		accountRepo:             accountRepo,
@@ -288,6 +290,7 @@ func NewAccountUsageService(
 		cache:                   cache,
 		identityCache:           identityCache,
 		tlsFPProfileService:     tlsFPProfileService,
+		clandesClient:           clandesClient,
 	}
 }
 
@@ -324,6 +327,18 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64) (*U
 			s.tryClearRecoverableAccountError(ctx, account)
 		}
 		return usage, err
+	}
+
+	// Clandes 账号：通过 ClaudeQueryService RPC 获取额度（不直接使用 access_token）
+	if IsClandesAccount(account) && s.clandesClient != nil {
+		usage, err := s.getClandesUsage(ctx, account)
+		if err == nil {
+			s.tryClearRecoverableAccountError(ctx, account)
+			return usage, nil
+		}
+		// RPC 失败时降级到标准 HTTP 路径
+		slog.Warn("clandes usage RPC failed, falling back to direct HTTP",
+			"account_id", account.ID, "error", err)
 	}
 
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
@@ -467,6 +482,17 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 	s.addWindowStats(ctx, account, info)
 
 	return info, nil
+}
+
+// getClandesUsage 通过 clandes RPC 获取账号额度
+func (s *AccountUsageService) getClandesUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
+	usage, err := s.clandesClient.GetUsage(ctx, fmt.Sprintf("%d", account.ID))
+	if err != nil {
+		return nil, err
+	}
+	s.addWindowStats(ctx, account, usage)
+	s.syncActiveToPassive(ctx, account.ID, usage)
+	return usage, nil
 }
 
 // syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，

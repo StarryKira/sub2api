@@ -4176,7 +4176,7 @@ const handleGenerateUrl = async () => {
     oauth.loading.value = true
     oauth.error.value = ''
     try {
-      const redirectUri = window.location.origin + '/admin/accounts'
+      const redirectUri = 'http://localhost:54321/callback'
       const result = await adminAPI.clandes.startOAuth(redirectUri, form.proxy_id)
       oauth.authUrl.value = result.auth_url
       oauth.sessionId.value = result.session_id
@@ -4641,7 +4641,7 @@ const handleAnthropicExchange = async (authCode: string) => {
 
     if (clandesExclusive.value) {
       // Clandes: exchange code via clandes RPC
-      const callbackUrl = window.location.origin + '/admin/accounts'
+      const callbackUrl = 'https://platform.claude.com/oauth/code/callback'
       const result = await adminAPI.clandes.exchangeOAuth(
         oauth.sessionId.value,
         authCode.trim(),

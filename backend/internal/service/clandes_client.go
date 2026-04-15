@@ -30,6 +30,8 @@ type ClandesClient struct {
 	conn        *rpc.Conn
 	service     proto.ClandesService
 	accountSvc  proto.AccountService
+	authSvc     proto.ClaudeAuthService
+	querySvc    proto.ClaudeQueryService
 	policySvc proto.PolicyService
 
 	routerImpl *clandesRouterImpl // owns the Router server capability
@@ -124,19 +126,12 @@ func (c *ClandesClient) Status() ClandesStatus {
 // Returns (authUrl, sessionId) for the frontend to redirect the user.
 func (c *ClandesClient) StartOAuthLogin(ctx context.Context, redirectURI, proxyURL string) (authURL, sessionID string, err error) {
 	c.mu.Lock()
-	if !c.service.IsValid() {
+	if !c.authSvc.IsValid() {
 		c.mu.Unlock()
 		return "", "", fmt.Errorf("clandes: not connected")
 	}
-	svcFut, svcRel := c.service.ClaudeAuthService(ctx, nil)
+	authSvc := c.authSvc.AddRef()
 	c.mu.Unlock()
-	defer svcRel()
-
-	svcRes, err := svcFut.Struct()
-	if err != nil {
-		return "", "", fmt.Errorf("clandes: get ClaudeAuthService: %w", err)
-	}
-	authSvc := svcRes.Svc()
 	defer authSvc.Release()
 
 	fut, rel := authSvc.StartLogin(ctx, func(p proto.ClaudeAuthService_startLogin_Params) error {
@@ -164,19 +159,12 @@ func (c *ClandesClient) StartOAuthLogin(ctx context.Context, redirectURI, proxyU
 // CompleteOAuthLogin exchanges the OAuth code for tokens via clandes.
 func (c *ClandesClient) CompleteOAuthLogin(ctx context.Context, sessionID, code, callbackURL string) (*OAuthLoginResult, error) {
 	c.mu.Lock()
-	if !c.service.IsValid() {
+	if !c.authSvc.IsValid() {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("clandes: not connected")
 	}
-	svcFut, svcRel := c.service.ClaudeAuthService(ctx, nil)
+	authSvc := c.authSvc.AddRef()
 	c.mu.Unlock()
-	defer svcRel()
-
-	svcRes, err := svcFut.Struct()
-	if err != nil {
-		return nil, fmt.Errorf("clandes: get ClaudeAuthService: %w", err)
-	}
-	authSvc := svcRes.Svc()
 	defer authSvc.Release()
 
 	fut, rel := authSvc.CompleteLogin(ctx, func(p proto.ClaudeAuthService_completeLogin_Params) error {
@@ -218,6 +206,89 @@ type OAuthLoginResult struct {
 	ExpiresIn      uint64
 	Email          string
 	OrganizationID string
+}
+
+// GetUsage fetches account usage (5h/7d quota) via ClaudeQueryService RPC.
+func (c *ClandesClient) GetUsage(ctx context.Context, accountID string) (*UsageInfo, error) {
+	c.mu.Lock()
+	if !c.querySvc.IsValid() {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("clandes: not connected")
+	}
+	querySvc := c.querySvc.AddRef()
+	c.mu.Unlock()
+	defer querySvc.Release()
+
+	fut, rel := querySvc.GetUsage(ctx, func(p proto.ClaudeQueryService_getUsage_Params) error {
+		return p.SetAccountId(accountID)
+	})
+	defer rel()
+
+	res, err := fut.Struct()
+	if err != nil {
+		return nil, fmt.Errorf("clandes: GetUsage RPC: %w", err)
+	}
+	if !res.Success() {
+		msg, _ := res.Message_()
+		return nil, fmt.Errorf("clandes: GetUsage failed: %s", msg)
+	}
+
+	return buildClandesUsageInfo(res)
+}
+
+// buildClandesUsageInfo maps ClaudeQueryService.getUsage results to UsageInfo.
+func buildClandesUsageInfo(res proto.ClaudeQueryService_getUsage_Results) (*UsageInfo, error) {
+	now := time.Now()
+	info := &UsageInfo{
+		Source:    "active",
+		UpdatedAt: &now,
+	}
+
+	// 5-hour window
+	if res.HasFiveHour() {
+		fh, err := res.FiveHour()
+		if err == nil {
+			info.FiveHour = usagePeriodToProgress(fh)
+		}
+	}
+
+	// 7-day window
+	if res.HasSevenDay() {
+		sd, err := res.SevenDay()
+		if err == nil {
+			p := usagePeriodToProgress(sd)
+			if p.ResetsAt != nil {
+				info.SevenDay = p
+			}
+		}
+	}
+
+	// 7-day sonnet window
+	if res.HasSevenDaySonnet() {
+		ss, err := res.SevenDaySonnet()
+		if err == nil {
+			p := usagePeriodToProgress(ss)
+			if p.ResetsAt != nil {
+				info.SevenDaySonnet = p
+			}
+		}
+	}
+
+	return info, nil
+}
+
+func usagePeriodToProgress(p proto.UsagePeriod) *UsageProgress {
+	prog := &UsageProgress{
+		Utilization: p.Utilization(),
+	}
+	resetsAt, err := p.ResetsAt()
+	if err == nil && resetsAt != "" {
+		if t, err := time.Parse(time.RFC3339, resetsAt); err == nil {
+			prog.ResetsAt = &t
+			prog.RemainingSeconds = int(time.Until(t).Seconds())
+		}
+	}
+	return prog
 }
 
 // AccountService returns the clandes AccountService client. Caller must call Release() when done.
@@ -281,6 +352,24 @@ func (c *ClandesClient) connect(ctx context.Context) error {
 		return fmt.Errorf("clandes: get AccountService: %w", err)
 	}
 	c.accountSvc = acctRes.Svc().AddRef()
+
+	// Get ClaudeAuthService sub-capability
+	caFut, caRel := c.service.ClaudeAuthService(ctx, nil)
+	defer caRel()
+	caRes, err := caFut.Struct()
+	if err != nil {
+		return fmt.Errorf("clandes: get ClaudeAuthService: %w", err)
+	}
+	c.authSvc = caRes.Svc().AddRef()
+
+	// Get ClaudeQueryService sub-capability
+	cqFut, cqRel := c.service.ClaudeQueryService(ctx, nil)
+	defer cqRel()
+	cqRes, err := cqFut.Struct()
+	if err != nil {
+		return fmt.Errorf("clandes: get ClaudeQueryService: %w", err)
+	}
+	c.querySvc = cqRes.Svc().AddRef()
 
 	// Get PolicyService sub-capability
 	cbFut, cbRel := c.service.PolicyService(ctx, nil)
@@ -352,6 +441,14 @@ func (c *ClandesClient) releaseCapabilities() {
 	if c.accountSvc.IsValid() {
 		c.accountSvc.Release()
 		c.accountSvc = proto.AccountService{}
+	}
+	if c.authSvc.IsValid() {
+		c.authSvc.Release()
+		c.authSvc = proto.ClaudeAuthService{}
+	}
+	if c.querySvc.IsValid() {
+		c.querySvc.Release()
+		c.querySvc = proto.ClaudeQueryService{}
 	}
 	if c.policySvc.IsValid() {
 		c.policySvc.Release()
