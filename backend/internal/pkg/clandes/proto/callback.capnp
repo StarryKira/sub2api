@@ -62,11 +62,18 @@ enum AccountEventKind {
 # 决策端实现此 capability，代理端持有并主动调用
 interface Router {
   routeRequest @0 (
-    requestId :Text,
-    apiKey    :Text,
-    model     :Text,
-    endpoint  :Text,
-    userAgent :Text,
+    requestId       :Text,
+    apiKey          :Text,
+    model           :Text,
+    endpoint        :Text,
+    userAgent       :Text,
+    # Claude Code 进程级会话 ID（来自 x-claude-code-session-id 头），
+    # 同一 Claude Code 进程的所有请求共享此值，可用于决策端实现粘性路由。
+    # 空字符串表示客户端未携带该头。
+    sessionId       :Text,
+    # 单次请求 ID（来自 x-client-request-id 头），每个 HTTP 请求独立。
+    # 空字符串表示客户端未携带该头。
+    clientRequestId :Text,
   ) -> (result :RouteResult);
 
   reportUsage @1 (requestId :Text, report :UsageReport) -> ();

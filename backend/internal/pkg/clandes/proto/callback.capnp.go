@@ -667,7 +667,7 @@ func (c Router) RouteRequest(ctx context.Context, params func(Router_routeReques
 		},
 	}
 	if params != nil {
-		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 5}
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 7}
 		s.PlaceArgs = func(s capnp.Struct) error { return params(Router_routeRequest_Params(s)) }
 	}
 
@@ -971,12 +971,12 @@ type Router_routeRequest_Params capnp.Struct
 const Router_routeRequest_Params_TypeID = 0xef6c55360ad6023c
 
 func NewRouter_routeRequest_Params(s *capnp.Segment) (Router_routeRequest_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 5})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 7})
 	return Router_routeRequest_Params(st), err
 }
 
 func NewRootRouter_routeRequest_Params(s *capnp.Segment) (Router_routeRequest_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 5})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 7})
 	return Router_routeRequest_Params(st), err
 }
 
@@ -1102,12 +1102,48 @@ func (s Router_routeRequest_Params) SetUserAgent(v string) error {
 	return capnp.Struct(s).SetText(4, v)
 }
 
+func (s Router_routeRequest_Params) SessionId() (string, error) {
+	p, err := capnp.Struct(s).Ptr(5)
+	return p.Text(), err
+}
+
+func (s Router_routeRequest_Params) HasSessionId() bool {
+	return capnp.Struct(s).HasPtr(5)
+}
+
+func (s Router_routeRequest_Params) SessionIdBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(5)
+	return p.TextBytes(), err
+}
+
+func (s Router_routeRequest_Params) SetSessionId(v string) error {
+	return capnp.Struct(s).SetText(5, v)
+}
+
+func (s Router_routeRequest_Params) ClientRequestId() (string, error) {
+	p, err := capnp.Struct(s).Ptr(6)
+	return p.Text(), err
+}
+
+func (s Router_routeRequest_Params) HasClientRequestId() bool {
+	return capnp.Struct(s).HasPtr(6)
+}
+
+func (s Router_routeRequest_Params) ClientRequestIdBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(6)
+	return p.TextBytes(), err
+}
+
+func (s Router_routeRequest_Params) SetClientRequestId(v string) error {
+	return capnp.Struct(s).SetText(6, v)
+}
+
 // Router_routeRequest_Params_List is a list of Router_routeRequest_Params.
 type Router_routeRequest_Params_List = capnp.StructList[Router_routeRequest_Params]
 
 // NewRouter_routeRequest_Params creates a new list of Router_routeRequest_Params.
 func NewRouter_routeRequest_Params_List(s *capnp.Segment, sz int32) (Router_routeRequest_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 5}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 7}, sz)
 	return capnp.StructList[Router_routeRequest_Params](l), err
 }
 

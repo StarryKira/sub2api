@@ -49,6 +49,7 @@ func (r *clandesRouterImpl) RouteRequest(ctx context.Context, call proto.Router_
 	apiKeyStr, _ := args.ApiKey()
 	model, _ := args.Model()
 	userAgent, _ := args.UserAgent()
+	sessionID, _ := args.SessionId()
 
 	log := logger.L().With(
 		zap.String("component", "clandes.router"),
@@ -98,7 +99,7 @@ func (r *clandesRouterImpl) RouteRequest(ctx context.Context, call proto.Router_
 	selection, err := r.gatewayService.SelectAccountWithLoadAwareness(
 		ctx,
 		apiKey.GroupID,
-		"", // no session hash
+		sessionID,
 		model,
 		nil,
 		"",
@@ -112,6 +113,12 @@ func (r *clandesRouterImpl) RouteRequest(ctx context.Context, call proto.Router_
 	// Release the slot immediately — clandes manages its own concurrency.
 	if selection.Acquired && selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
+	}
+
+	// Bind sticky session so subsequent requests in the same Claude Code session
+	// route to the same account (preserves prompt cache).
+	if sessionID != "" {
+		_ = r.gatewayService.BindStickySession(ctx, apiKey.GroupID, sessionID, account.ID)
 	}
 
 	// 4. Resolve subscription for subscription-type groups
