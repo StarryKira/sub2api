@@ -11,7 +11,7 @@ import (
 
 // ClandesHandler exposes clandes integration status and control to the admin UI.
 type ClandesHandler struct {
-	client      *service.ClandesClient   // may be nil when clandes.enabled=false
+	client      *service.ClandesClient // may be nil when clandes.enabled=false
 	accountRepo service.AccountRepository
 	proxyRepo   service.ProxyRepository
 }

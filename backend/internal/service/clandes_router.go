@@ -110,9 +110,10 @@ func (r *clandesRouterImpl) RouteRequest(ctx context.Context, call proto.Router_
 		return reject(503, "no available account")
 	}
 	account := selection.Account
-	// Release the slot immediately — clandes manages its own concurrency.
+	// Hold the concurrency slot until ReportUsage (or disconnect cleanup).
+	var releaseFunc func()
 	if selection.Acquired && selection.ReleaseFunc != nil {
-		selection.ReleaseFunc()
+		releaseFunc = selection.ReleaseFunc
 	}
 
 	// Bind sticky session so subsequent requests in the same Claude Code session
@@ -138,6 +139,7 @@ func (r *clandesRouterImpl) RouteRequest(ctx context.Context, call proto.Router_
 		GroupID:      apiKey.GroupID,
 		StartTime:    time.Now(),
 		UserAgent:    userAgent,
+		ReleaseFunc:  releaseFunc,
 	})
 
 	log.Info("routeRequest: routed", zap.Int64("account_id", account.ID))
@@ -184,6 +186,10 @@ func (r *clandesRouterImpl) ReportUsage(ctx context.Context, call proto.Router_r
 	if !ok {
 		log.Warn("reportUsage: no cached context (expired or unknown request_id)")
 		return nil
+	}
+	// Release the concurrency slot now that the request is complete.
+	if rctx.ReleaseFunc != nil {
+		rctx.ReleaseFunc()
 	}
 
 	model, _ := report.Model()

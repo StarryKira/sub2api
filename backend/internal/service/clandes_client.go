@@ -26,13 +26,13 @@ type ClandesClient struct {
 	authToken         string
 	reconnectInterval time.Duration
 
-	mu          sync.Mutex
-	conn        *rpc.Conn
-	service     proto.ClandesService
-	accountSvc  proto.AccountService
-	authSvc     proto.ClaudeAuthService
-	querySvc    proto.ClaudeQueryService
-	policySvc proto.PolicyService
+	mu         sync.Mutex
+	conn       *rpc.Conn
+	service    proto.ClandesService
+	accountSvc proto.AccountService
+	authSvc    proto.ClaudeAuthService
+	querySvc   proto.ClaudeQueryService
+	policySvc  proto.PolicyService
 
 	routerImpl *clandesRouterImpl // owns the Router server capability
 	reqCache   *clandesRequestCache
@@ -105,7 +105,7 @@ func (c *ClandesClient) Close() {
 		defer c.mu.Unlock()
 		c.releaseCapabilities()
 		if c.conn != nil {
-			c.conn.Close()
+			_ = c.conn.Close()
 			c.conn = nil
 		}
 	})
@@ -318,7 +318,7 @@ func (c *ClandesClient) connect(ctx context.Context) error {
 	// Close stale connection if any
 	if c.conn != nil {
 		c.releaseCapabilities()
-		c.conn.Close()
+		_ = c.conn.Close()
 		c.conn = nil
 	}
 
@@ -402,8 +402,7 @@ func (c *ClandesClient) registerCallback(ctx context.Context) error {
 
 	// Register with clandes
 	connFut, rel := c.policySvc.Connect(ctx, func(p proto.PolicyService_connect_Params) error {
-		p.SetRouter(routerClient)
-		return nil
+		return p.SetRouter(routerClient)
 	})
 	defer rel()
 
@@ -421,7 +420,10 @@ func (c *ClandesClient) reconnectLoop(syncAccounts func(ctx context.Context, cli
 		case <-c.closed:
 			return
 		case <-c.conn.Done():
-			logger.L().Warn("clandes: connection lost, reconnecting", zap.Duration("in", c.reconnectInterval))
+			flushed := c.reqCache.flushAll()
+			logger.L().Warn("clandes: connection lost, flushed in-flight slots",
+				zap.Int("flushed", flushed),
+				zap.Duration("reconnect_in", c.reconnectInterval))
 		}
 	}
 
@@ -451,7 +453,10 @@ func (c *ClandesClient) reconnectLoop(syncAccounts func(ctx context.Context, cli
 		case <-c.closed:
 			return
 		case <-c.conn.Done():
-			logger.L().Warn("clandes: connection lost, reconnecting", zap.Duration("in", c.reconnectInterval))
+			flushed := c.reqCache.flushAll()
+			logger.L().Warn("clandes: connection lost, flushed in-flight slots",
+				zap.Int("flushed", flushed),
+				zap.Duration("reconnect_in", c.reconnectInterval))
 		}
 	}
 }
@@ -478,4 +483,3 @@ func (c *ClandesClient) releaseCapabilities() {
 		c.service = proto.ClandesService{}
 	}
 }
-
