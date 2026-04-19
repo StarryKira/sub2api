@@ -33,6 +33,7 @@ type ClandesClient struct {
 	authSvc    proto.ClaudeAuthService
 	querySvc   proto.ClaudeQueryService
 	policySvc  proto.PolicyService
+	version    string
 
 	routerImpl *clandesRouterImpl // owns the Router server capability
 	reqCache   *clandesRequestCache
@@ -116,6 +117,7 @@ type ClandesStatus struct {
 	Enabled   bool   `json:"enabled"`
 	Connected bool   `json:"connected"`
 	Addr      string `json:"addr"`
+	Version   string `json:"version,omitempty"`
 }
 
 // Status returns the current connection status of the client.
@@ -127,6 +129,7 @@ func (c *ClandesClient) Status() ClandesStatus {
 		Enabled:   true,
 		Connected: connected,
 		Addr:      c.addr,
+		Version:   c.version,
 	}
 }
 
@@ -388,7 +391,14 @@ func (c *ClandesClient) connect(ctx context.Context) error {
 	}
 	c.policySvc = cbRes.Svc().AddRef()
 
-	logger.L().Info("clandes: connected", zap.String("addr", c.addr))
+	// Fetch server version (best-effort; non-fatal if the server is older)
+	verFut, verRel := c.service.GetVersion(ctx, nil)
+	defer verRel()
+	if verRes, verErr := verFut.Struct(); verErr == nil {
+		c.version, _ = verRes.Version()
+	}
+
+	logger.L().Info("clandes: connected", zap.String("addr", c.addr), zap.String("version", c.version))
 	return nil
 }
 
@@ -482,4 +492,5 @@ func (c *ClandesClient) releaseCapabilities() {
 		c.service.Release()
 		c.service = proto.ClandesService{}
 	}
+	c.version = ""
 }

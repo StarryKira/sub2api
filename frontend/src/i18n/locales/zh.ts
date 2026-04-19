@@ -5247,6 +5247,7 @@ export default {
       connected: '已连接',
       disconnected: '已断开',
       addr: '服务器地址',
+      version: '版本',
       syncAccounts: '同步账号',
       syncSuccess: '账号同步成功',
       syncFailed: '账号同步失败',

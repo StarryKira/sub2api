@@ -42,6 +42,10 @@
             <dt class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.clandes.addr') }}</dt>
             <dd class="font-mono text-sm text-gray-900 dark:text-white">{{ status.addr }}</dd>
           </div>
+          <div v-if="status.enabled && status.version" class="flex items-center justify-between">
+            <dt class="text-sm text-gray-600 dark:text-gray-400">{{ t('admin.clandes.version') }}</dt>
+            <dd class="font-mono text-sm text-gray-900 dark:text-white">{{ status.version }}</dd>
+          </div>
         </dl>
 
         <div v-if="!status.enabled" class="mt-5 rounded-lg bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">

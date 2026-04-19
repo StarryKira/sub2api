@@ -5084,6 +5084,7 @@ export default {
       connected: 'Connected',
       disconnected: 'Disconnected',
       addr: 'Server Address',
+      version: 'Version',
       syncAccounts: 'Sync Accounts',
       syncSuccess: 'Accounts synced successfully',
       syncFailed: 'Account sync failed',

@@ -8,6 +8,7 @@ export interface ClandesStatus {
   enabled: boolean
   connected: boolean
   addr: string
+  version?: string
 }
 
 export async function getStatus(): Promise<ClandesStatus> {
