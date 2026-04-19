@@ -158,7 +158,7 @@ func (c ProxyService_probeProxy) Args() ProxyService_probeProxy_Params {
 
 // AllocResults allocates the results struct.
 func (c ProxyService_probeProxy) AllocResults() (ProxyService_probeProxy_Results, error) {
-	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 8, PointerCount: 3})
 	return ProxyService_probeProxy_Results(r), err
 }
 
@@ -259,12 +259,12 @@ type ProxyService_probeProxy_Results capnp.Struct
 const ProxyService_probeProxy_Results_TypeID = 0x8873f9097b095502
 
 func NewProxyService_probeProxy_Results(s *capnp.Segment) (ProxyService_probeProxy_Results, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
 	return ProxyService_probeProxy_Results(st), err
 }
 
 func NewRootProxyService_probeProxy_Results(s *capnp.Segment) (ProxyService_probeProxy_Results, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2})
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3})
 	return ProxyService_probeProxy_Results(st), err
 }
 
@@ -350,12 +350,36 @@ func (s ProxyService_probeProxy_Results) NewProxyInfo() (ProxyInfo, error) {
 	return ss, err
 }
 
+func (s ProxyService_probeProxy_Results) Timing() (ProbeTiming, error) {
+	p, err := capnp.Struct(s).Ptr(2)
+	return ProbeTiming(p.Struct()), err
+}
+
+func (s ProxyService_probeProxy_Results) HasTiming() bool {
+	return capnp.Struct(s).HasPtr(2)
+}
+
+func (s ProxyService_probeProxy_Results) SetTiming(v ProbeTiming) error {
+	return capnp.Struct(s).SetPtr(2, capnp.Struct(v).ToPtr())
+}
+
+// NewTiming sets the timing field to a newly
+// allocated ProbeTiming struct, preferring placement in s's segment.
+func (s ProxyService_probeProxy_Results) NewTiming() (ProbeTiming, error) {
+	ss, err := NewProbeTiming(capnp.Struct(s).Segment())
+	if err != nil {
+		return ProbeTiming{}, err
+	}
+	err = capnp.Struct(s).SetPtr(2, capnp.Struct(ss).ToPtr())
+	return ss, err
+}
+
 // ProxyService_probeProxy_Results_List is a list of ProxyService_probeProxy_Results.
 type ProxyService_probeProxy_Results_List = capnp.StructList[ProxyService_probeProxy_Results]
 
 // NewProxyService_probeProxy_Results creates a new list of ProxyService_probeProxy_Results.
 func NewProxyService_probeProxy_Results_List(s *capnp.Segment, sz int32) (ProxyService_probeProxy_Results_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 2}, sz)
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 3}, sz)
 	return capnp.StructList[ProxyService_probeProxy_Results](l), err
 }
 
@@ -368,4 +392,7 @@ func (f ProxyService_probeProxy_Results_Future) Struct() (ProxyService_probeProx
 }
 func (p ProxyService_probeProxy_Results_Future) ProxyInfo() ProxyInfo_Future {
 	return ProxyInfo_Future{Future: p.Future.Field(1, nil)}
+}
+func (p ProxyService_probeProxy_Results_Future) Timing() ProbeTiming_Future {
+	return ProbeTiming_Future{Future: p.Future.Field(2, nil)}
 }

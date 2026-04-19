@@ -22,4 +22,5 @@ interface ClandesService {
   claudeQueryService @2 () -> (svc :Query.ClaudeQueryService);
   proxyService      @3 () -> (svc :Proxy.ProxyService);
   policyService     @4 () -> (svc :Policy.PolicyService);
+  getVersion        @5 () -> (version :Text);
 }

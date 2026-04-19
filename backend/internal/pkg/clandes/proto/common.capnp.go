@@ -222,3 +222,115 @@ func (f ProxyInfo_Future) Struct() (ProxyInfo, error) {
 	p, err := f.Future.Ptr()
 	return ProxyInfo(p.Struct()), err
 }
+
+type ProbeTiming capnp.Struct
+
+// ProbeTiming_TypeID is the unique identifier for the type ProbeTiming.
+const ProbeTiming_TypeID = 0x92600b6ece7a8651
+
+func NewProbeTiming(s *capnp.Segment) (ProbeTiming, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 48, PointerCount: 0})
+	return ProbeTiming(st), err
+}
+
+func NewRootProbeTiming(s *capnp.Segment) (ProbeTiming, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 48, PointerCount: 0})
+	return ProbeTiming(st), err
+}
+
+func ReadRootProbeTiming(msg *capnp.Message) (ProbeTiming, error) {
+	root, err := msg.Root()
+	return ProbeTiming(root.Struct()), err
+}
+
+func (s ProbeTiming) String() string {
+	str, _ := text.Marshal(0x92600b6ece7a8651, capnp.Struct(s))
+	return str
+}
+
+func (s ProbeTiming) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ProbeTiming) DecodeFromPtr(p capnp.Ptr) ProbeTiming {
+	return ProbeTiming(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ProbeTiming) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ProbeTiming) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ProbeTiming) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ProbeTiming) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ProbeTiming) ClientBuildUs() uint64 {
+	return capnp.Struct(s).Uint64(0)
+}
+
+func (s ProbeTiming) SetClientBuildUs(v uint64) {
+	capnp.Struct(s).SetUint64(0, v)
+}
+
+func (s ProbeTiming) RequestSendMs() uint64 {
+	return capnp.Struct(s).Uint64(8)
+}
+
+func (s ProbeTiming) SetRequestSendMs(v uint64) {
+	capnp.Struct(s).SetUint64(8, v)
+}
+
+func (s ProbeTiming) BodyReadUs() uint64 {
+	return capnp.Struct(s).Uint64(16)
+}
+
+func (s ProbeTiming) SetBodyReadUs(v uint64) {
+	capnp.Struct(s).SetUint64(16, v)
+}
+
+func (s ProbeTiming) JsonParseUs() uint64 {
+	return capnp.Struct(s).Uint64(24)
+}
+
+func (s ProbeTiming) SetJsonParseUs(v uint64) {
+	capnp.Struct(s).SetUint64(24, v)
+}
+
+func (s ProbeTiming) TotalMs() uint64 {
+	return capnp.Struct(s).Uint64(32)
+}
+
+func (s ProbeTiming) SetTotalMs(v uint64) {
+	capnp.Struct(s).SetUint64(32, v)
+}
+
+func (s ProbeTiming) BodyLen() uint64 {
+	return capnp.Struct(s).Uint64(40)
+}
+
+func (s ProbeTiming) SetBodyLen(v uint64) {
+	capnp.Struct(s).SetUint64(40, v)
+}
+
+// ProbeTiming_List is a list of ProbeTiming.
+type ProbeTiming_List = capnp.StructList[ProbeTiming]
+
+// NewProbeTiming creates a new list of ProbeTiming.
+func NewProbeTiming_List(s *capnp.Segment, sz int32) (ProbeTiming_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 48, PointerCount: 0}, sz)
+	return capnp.StructList[ProbeTiming](l), err
+}
+
+// ProbeTiming_Future is a wrapper for a ProbeTiming promised by a client call.
+type ProbeTiming_Future struct{ *capnp.Future }
+
+func (f ProbeTiming_Future) Struct() (ProbeTiming, error) {
+	p, err := f.Future.Ptr()
+	return ProbeTiming(p.Struct()), err
+}

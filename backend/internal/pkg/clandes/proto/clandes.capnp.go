@@ -443,6 +443,26 @@ func (c ClandesService) PolicyService(ctx context.Context, params func(ClandesSe
 
 }
 
+func (c ClandesService) GetVersion(ctx context.Context, params func(ClandesService_getVersion_Params) error) (ClandesService_getVersion_Results_Future, capnp.ReleaseFunc) {
+
+	s := capnp.Send{
+		Method: capnp.Method{
+			InterfaceID:   0xc2b6e8aae63a6302,
+			MethodID:      5,
+			InterfaceName: "clandes.capnp:ClandesService",
+			MethodName:    "getVersion",
+		},
+	}
+	if params != nil {
+		s.ArgsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
+		s.PlaceArgs = func(s capnp.Struct) error { return params(ClandesService_getVersion_Params(s)) }
+	}
+
+	ans, release := capnp.Client(c).SendCall(ctx, s)
+	return ClandesService_getVersion_Results_Future{Future: ans.Future()}, release
+
+}
+
 func (c ClandesService) WaitStreaming() error {
 	return capnp.Client(c).WaitStreaming()
 }
@@ -525,6 +545,8 @@ type ClandesService_Server interface {
 	ProxyService(context.Context, ClandesService_proxyService) error
 
 	PolicyService(context.Context, ClandesService_policyService) error
+
+	GetVersion(context.Context, ClandesService_getVersion) error
 }
 
 // ClandesService_NewServer creates a new Server from an implementation of ClandesService_Server.
@@ -543,7 +565,7 @@ func ClandesService_ServerToClient(s ClandesService_Server) ClandesService {
 // This can be used to create a more complicated Server.
 func ClandesService_Methods(methods []server.Method, s ClandesService_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 5)
+		methods = make([]server.Method, 0, 6)
 	}
 
 	methods = append(methods, server.Method{
@@ -603,6 +625,18 @@ func ClandesService_Methods(methods []server.Method, s ClandesService_Server) []
 		},
 		Impl: func(ctx context.Context, call *server.Call) error {
 			return s.PolicyService(ctx, ClandesService_policyService{call})
+		},
+	})
+
+	methods = append(methods, server.Method{
+		Method: capnp.Method{
+			InterfaceID:   0xc2b6e8aae63a6302,
+			MethodID:      5,
+			InterfaceName: "clandes.capnp:ClandesService",
+			MethodName:    "getVersion",
+		},
+		Impl: func(ctx context.Context, call *server.Call) error {
+			return s.GetVersion(ctx, ClandesService_getVersion{call})
 		},
 	})
 
@@ -692,6 +726,23 @@ func (c ClandesService_policyService) Args() ClandesService_policyService_Params
 func (c ClandesService_policyService) AllocResults() (ClandesService_policyService_Results, error) {
 	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
 	return ClandesService_policyService_Results(r), err
+}
+
+// ClandesService_getVersion holds the state for a server call to ClandesService.getVersion.
+// See server.Call for documentation.
+type ClandesService_getVersion struct {
+	*server.Call
+}
+
+// Args returns the call's arguments.
+func (c ClandesService_getVersion) Args() ClandesService_getVersion_Params {
+	return ClandesService_getVersion_Params(c.Call.Args())
+}
+
+// AllocResults allocates the results struct.
+func (c ClandesService_getVersion) AllocResults() (ClandesService_getVersion_Results, error) {
+	r, err := c.Call.AllocResults(capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClandesService_getVersion_Results(r), err
 }
 
 // ClandesService_List is a list of ClandesService.
@@ -1451,4 +1502,151 @@ func (f ClandesService_policyService_Results_Future) Struct() (ClandesService_po
 }
 func (p ClandesService_policyService_Results_Future) Svc() PolicyService {
 	return PolicyService(p.Future.Field(0, nil).Client())
+}
+
+type ClandesService_getVersion_Params capnp.Struct
+
+// ClandesService_getVersion_Params_TypeID is the unique identifier for the type ClandesService_getVersion_Params.
+const ClandesService_getVersion_Params_TypeID = 0x8a269637f1cc83d2
+
+func NewClandesService_getVersion_Params(s *capnp.Segment) (ClandesService_getVersion_Params, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClandesService_getVersion_Params(st), err
+}
+
+func NewRootClandesService_getVersion_Params(s *capnp.Segment) (ClandesService_getVersion_Params, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
+	return ClandesService_getVersion_Params(st), err
+}
+
+func ReadRootClandesService_getVersion_Params(msg *capnp.Message) (ClandesService_getVersion_Params, error) {
+	root, err := msg.Root()
+	return ClandesService_getVersion_Params(root.Struct()), err
+}
+
+func (s ClandesService_getVersion_Params) String() string {
+	str, _ := text.Marshal(0x8a269637f1cc83d2, capnp.Struct(s))
+	return str
+}
+
+func (s ClandesService_getVersion_Params) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClandesService_getVersion_Params) DecodeFromPtr(p capnp.Ptr) ClandesService_getVersion_Params {
+	return ClandesService_getVersion_Params(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClandesService_getVersion_Params) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClandesService_getVersion_Params) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClandesService_getVersion_Params) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClandesService_getVersion_Params) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+
+// ClandesService_getVersion_Params_List is a list of ClandesService_getVersion_Params.
+type ClandesService_getVersion_Params_List = capnp.StructList[ClandesService_getVersion_Params]
+
+// NewClandesService_getVersion_Params creates a new list of ClandesService_getVersion_Params.
+func NewClandesService_getVersion_Params_List(s *capnp.Segment, sz int32) (ClandesService_getVersion_Params_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
+	return capnp.StructList[ClandesService_getVersion_Params](l), err
+}
+
+// ClandesService_getVersion_Params_Future is a wrapper for a ClandesService_getVersion_Params promised by a client call.
+type ClandesService_getVersion_Params_Future struct{ *capnp.Future }
+
+func (f ClandesService_getVersion_Params_Future) Struct() (ClandesService_getVersion_Params, error) {
+	p, err := f.Future.Ptr()
+	return ClandesService_getVersion_Params(p.Struct()), err
+}
+
+type ClandesService_getVersion_Results capnp.Struct
+
+// ClandesService_getVersion_Results_TypeID is the unique identifier for the type ClandesService_getVersion_Results.
+const ClandesService_getVersion_Results_TypeID = 0xcbe105196a238925
+
+func NewClandesService_getVersion_Results(s *capnp.Segment) (ClandesService_getVersion_Results, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClandesService_getVersion_Results(st), err
+}
+
+func NewRootClandesService_getVersion_Results(s *capnp.Segment) (ClandesService_getVersion_Results, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
+	return ClandesService_getVersion_Results(st), err
+}
+
+func ReadRootClandesService_getVersion_Results(msg *capnp.Message) (ClandesService_getVersion_Results, error) {
+	root, err := msg.Root()
+	return ClandesService_getVersion_Results(root.Struct()), err
+}
+
+func (s ClandesService_getVersion_Results) String() string {
+	str, _ := text.Marshal(0xcbe105196a238925, capnp.Struct(s))
+	return str
+}
+
+func (s ClandesService_getVersion_Results) EncodeAsPtr(seg *capnp.Segment) capnp.Ptr {
+	return capnp.Struct(s).EncodeAsPtr(seg)
+}
+
+func (ClandesService_getVersion_Results) DecodeFromPtr(p capnp.Ptr) ClandesService_getVersion_Results {
+	return ClandesService_getVersion_Results(capnp.Struct{}.DecodeFromPtr(p))
+}
+
+func (s ClandesService_getVersion_Results) ToPtr() capnp.Ptr {
+	return capnp.Struct(s).ToPtr()
+}
+func (s ClandesService_getVersion_Results) IsValid() bool {
+	return capnp.Struct(s).IsValid()
+}
+
+func (s ClandesService_getVersion_Results) Message() *capnp.Message {
+	return capnp.Struct(s).Message()
+}
+
+func (s ClandesService_getVersion_Results) Segment() *capnp.Segment {
+	return capnp.Struct(s).Segment()
+}
+func (s ClandesService_getVersion_Results) Version() (string, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.Text(), err
+}
+
+func (s ClandesService_getVersion_Results) HasVersion() bool {
+	return capnp.Struct(s).HasPtr(0)
+}
+
+func (s ClandesService_getVersion_Results) VersionBytes() ([]byte, error) {
+	p, err := capnp.Struct(s).Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s ClandesService_getVersion_Results) SetVersion(v string) error {
+	return capnp.Struct(s).SetText(0, v)
+}
+
+// ClandesService_getVersion_Results_List is a list of ClandesService_getVersion_Results.
+type ClandesService_getVersion_Results_List = capnp.StructList[ClandesService_getVersion_Results]
+
+// NewClandesService_getVersion_Results creates a new list of ClandesService_getVersion_Results.
+func NewClandesService_getVersion_Results_List(s *capnp.Segment, sz int32) (ClandesService_getVersion_Results_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
+	return capnp.StructList[ClandesService_getVersion_Results](l), err
+}
+
+// ClandesService_getVersion_Results_Future is a wrapper for a ClandesService_getVersion_Results promised by a client call.
+type ClandesService_getVersion_Results_Future struct{ *capnp.Future }
+
+func (f ClandesService_getVersion_Results_Future) Struct() (ClandesService_getVersion_Results, error) {
+	p, err := f.Future.Ptr()
+	return ClandesService_getVersion_Results(p.Struct()), err
 }

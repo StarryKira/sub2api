@@ -10,6 +10,7 @@ interface ProxyService {
   probeProxy @0 (proxyUrl :Text) -> (
     success   :Bool,
     message   :Text,
-    proxyInfo :Common.ProxyInfo
+    proxyInfo :Common.ProxyInfo,
+    timing    :Common.ProbeTiming
   );
 }
