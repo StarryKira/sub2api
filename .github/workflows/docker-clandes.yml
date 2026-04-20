@@ -1,0 +1,80 @@
+name: Docker Build & Push (clandes)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag, e.g. 0.1.114-clandes.4'
+        required: true
+        type: string
+      push_latest:
+        description: 'Also tag as latest'
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*-clandes*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve image tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            PUSH_LATEST="${{ github.event.inputs.push_latest }}"
+          else
+            # refs/tags/v0.1.114-clandes.4 → 0.1.114-clandes.4
+            TAG="${GITHUB_REF#refs/tags/v}"
+            PUSH_LATEST="true"
+          fi
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          BASE="ghcr.io/${OWNER}/sub2api-clandes"
+          TAGS="${BASE}:${TAG}"
+          if [ "${PUSH_LATEST}" = "true" ]; then
+            TAGS="${TAGS}
+          ${BASE}:latest"
+          fi
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$TAGS"      >> "$GITHUB_OUTPUT"
+          echo "EOF"        >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            GOPROXY=https://goproxy.cn,direct
+            GOSUMDB=sum.golang.google.cn
+            VERSION=${{ steps.meta.outputs.tag }}
+            COMMIT=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
