@@ -2,7 +2,7 @@
 
 中文 | [English](./README.md)
 
-[sub2api](https://github.com/Wei-Shaw/sub2api) 的一个 fork，集成了 [clandes](https://github.com/Wei-Shaw/clandes) —— 让 Rust 写的决策/代理层去处理 Claude Code 流量，sub2api 仍然负责计费、账号和后台管理。
+[sub2api](https://github.com/Wei-Shaw/sub2api) 的一个 fork，集成了 [clandes](https://github.com/Shirasuki/OpenClandes) —— 让 Rust 写的决策/代理层去处理 Claude Code 流量，sub2api 仍然负责计费、账号和后台管理。
 
 > **本 README 只说明与上游 sub2api 的差异。** 基础网关能力（多账号池、API Key 下发、订阅计费、支付等）请先看[上游 README](https://github.com/Wei-Shaw/sub2api/blob/main/README.md)。
 
@@ -43,7 +43,7 @@ clandes 是一个本地代理 Anthropic TLS/HTTP2 的 Rust 二进制，提供指
 docker pull ghcr.io/starrykira/sub2api:0.1.114-clandes.1
 ```
 
-同时需要一个跑在 `127.0.0.1:8082` 的 clandes 服务（构建和运行方式见 [clandes 仓库](https://github.com/Wei-Shaw/clandes)）。
+同时需要一个跑在 `127.0.0.1:8082` 的 clandes 服务（构建和运行方式见 [clandes 仓库](https://github.com/Shirasuki/OpenClandes)）。
 
 ### 配置
 
@@ -117,4 +117,4 @@ ghcr.io/starrykira/sub2api:<version>-clandes[.<revision>]
 ## 致谢
 
 - [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) —— 基础网关
-- [clandes](https://github.com/Wei-Shaw/clandes) —— Rust 代理/决策层
+- [clandes](https://github.com/Shirasuki/OpenClandes) —— Rust 代理/决策层

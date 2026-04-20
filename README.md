@@ -2,7 +2,7 @@
 
 [中文](./README.zh.md) | English
 
-A fork of [sub2api](https://github.com/Wei-Shaw/sub2api) with [clandes](https://github.com/Wei-Shaw/clandes) integration — routing Claude Code traffic through a Rust-based decision/proxy plane while sub2api remains the billing, account, and admin plane.
+A fork of [sub2api](https://github.com/Wei-Shaw/sub2api) with [clandes](https://github.com/Shirasuki/OpenClandes) integration — routing Claude Code traffic through a Rust-based decision/proxy plane while sub2api remains the billing, account, and admin plane.
 
 > **Scope.** This README only documents what is different from upstream sub2api. For the base gateway — multi-account pooling, API-key generation, subscription billing, payments, etc. — read the [upstream README](https://github.com/Wei-Shaw/sub2api/blob/main/README.md) first.
 
@@ -43,7 +43,7 @@ clandes is a Rust binary that terminates Anthropic's TLS/HTTP/2 locally with fin
 docker pull ghcr.io/starrykira/sub2api:0.1.114-clandes.1
 ```
 
-Plus a running clandes server on `127.0.0.1:8082` (see [clandes repo](https://github.com/Wei-Shaw/clandes) for build/run).
+Plus a running clandes server on `127.0.0.1:8082` (see [clandes repo](https://github.com/Shirasuki/OpenClandes) for build/run).
 
 ### Configuration
 
@@ -117,4 +117,4 @@ Inherits the upstream [sub2api license](https://github.com/Wei-Shaw/sub2api/blob
 ## Credits
 
 - [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) — base gateway
-- [clandes](https://github.com/Wei-Shaw/clandes) — Rust proxy/decision plane
+- [clandes](https://github.com/Shirasuki/OpenClandes) — Rust proxy/decision plane
