@@ -241,6 +241,7 @@ const isOpenAILike = computed(() => isOpenAI.value)
 const isGemini = computed(() => props.account?.platform === 'gemini')
 const isAnthropic = computed(() => props.account?.platform === 'anthropic')
 const isAntigravity = computed(() => props.account?.platform === 'antigravity')
+const isClandesAccount = computed(() => (props.account?.extra as any)?.clandes === true)
 
 // Computed - current OAuth state based on platform
 const currentAuthUrl = computed(() => {
@@ -335,6 +336,20 @@ const handleGenerateUrl = async () => {
     await geminiOAuth.generateAuthUrl(props.account.proxy_id, projectId, geminiOAuthType.value, tierId)
   } else if (isAntigravity.value) {
     await antigravityOAuth.generateAuthUrl(props.account.proxy_id)
+  } else if (isClandesAccount.value) {
+    claudeOAuth.loading.value = true
+    claudeOAuth.error.value = ''
+    try {
+      const redirectUri = 'http://localhost:54321/callback'
+      const result = await adminAPI.clandes.startOAuth(redirectUri, props.account.proxy_id)
+      claudeOAuth.authUrl.value = result.auth_url
+      claudeOAuth.sessionId.value = result.session_id
+    } catch (err: any) {
+      claudeOAuth.error.value = err.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+      appStore.showError(claudeOAuth.error.value)
+    } finally {
+      claudeOAuth.loading.value = false
+    }
   } else {
     await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
   }
@@ -468,17 +483,34 @@ const handleExchangeCode = async () => {
           ? '/admin/accounts/exchange-code'
           : '/admin/accounts/exchange-setup-token-code'
 
-      const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
-        session_id: sessionId,
-        code: authCode.trim(),
-        ...proxyConfig
-      })
+      let tokenInfo: any
+      if (isClandesAccount.value) {
+        const callbackUrl = 'https://platform.claude.com/oauth/code/callback'
+        const result = await adminAPI.clandes.exchangeOAuth(sessionId, authCode.trim(), callbackUrl)
+        tokenInfo = {
+          access_token: result.access_token,
+          refresh_token: result.refresh_token,
+          expires_in: result.expires_in,
+          email_address: result.email,
+          org_uuid: result.org_uuid
+        }
+      } else {
+        tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
+          session_id: sessionId,
+          code: authCode.trim(),
+          ...proxyConfig
+        })
+      }
 
-      const extra = claudeOAuth.buildExtraInfo(tokenInfo)
+      const baseExtra = claudeOAuth.buildExtraInfo(tokenInfo) || {}
+      const extra: Record<string, unknown> = { ...baseExtra }
+      if (isClandesAccount.value) {
+        extra.clandes = true
+      }
 
       // Update account with new credentials and type
       await adminAPI.accounts.update(props.account.id, {
-        type: addMethod.value, // Update type based on selected method
+        type: addMethod.value,
         credentials: tokenInfo,
         extra
       })
