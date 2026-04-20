@@ -571,6 +571,8 @@ func registerClandesRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	clandes := admin.Group("/clandes")
 	{
 		clandes.GET("/status", h.Admin.Clandes.GetStatus)
+		clandes.GET("/config", h.Admin.Clandes.GetConfig)
+		clandes.POST("/config", h.Admin.Clandes.UpdateConfig)
 		clandes.POST("/sync", h.Admin.Clandes.SyncAccounts)
 		clandes.POST("/oauth/start", h.Admin.Clandes.StartOAuthLogin)
 		clandes.POST("/oauth/exchange", h.Admin.Clandes.CompleteOAuthLogin)

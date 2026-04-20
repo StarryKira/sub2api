@@ -16,6 +16,37 @@ export async function getStatus(): Promise<ClandesStatus> {
   return data
 }
 
+export interface ClandesConfig {
+  enabled: boolean
+  addr: string
+  auth_token_configured: boolean
+  reconnect_interval: number
+  config_file: string
+}
+
+export interface ClandesConfigUpdate {
+  enabled: boolean
+  addr: string
+  // null = keep existing token; "" = clear
+  auth_token: string | null
+  reconnect_interval: number
+}
+
+export async function getConfig(): Promise<ClandesConfig> {
+  const { data } = await apiClient.get<ClandesConfig>('/admin/clandes/config')
+  return data
+}
+
+export async function updateConfig(
+  payload: ClandesConfigUpdate
+): Promise<{ message: string; config_file: string }> {
+  const { data } = await apiClient.post<{ message: string; config_file: string }>(
+    '/admin/clandes/config',
+    payload
+  )
+  return data
+}
+
 export async function syncAccounts(): Promise<{ message: string }> {
   const { data } = await apiClient.post<{ message: string }>('/admin/clandes/sync')
   return data
@@ -60,6 +91,8 @@ export async function exchangeOAuth(
 
 export const clandesAPI = {
   getStatus,
+  getConfig,
+  updateConfig,
   syncAccounts,
   startOAuth,
   exchangeOAuth

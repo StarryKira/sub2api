@@ -48,10 +48,6 @@
           </div>
         </dl>
 
-        <div v-if="!status.enabled" class="mt-5 rounded-lg bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-          {{ t('admin.clandes.notEnabled') }}
-        </div>
-
         <div v-if="status.enabled" class="mt-6">
           <button type="button" class="btn btn-primary btn-sm" :disabled="syncing || !status.connected" @click="doSync">
             {{ syncing ? t('common.loading') : t('admin.clandes.syncAccounts') }}
@@ -64,24 +60,96 @@
         {{ t('admin.clandes.loadError') }}
         <button type="button" class="ml-2 underline" @click="fetchStatus">{{ t('common.refresh') }}</button>
       </div>
+
+      <div v-if="config" class="card p-6">
+        <h3 class="mb-1 text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.clandes.configTitle') }}</h3>
+        <p class="mb-5 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.clandes.configDesc') }}
+          <code v-if="config.config_file" class="ml-1 rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-gray-800">{{ config.config_file }}</code>
+        </p>
+
+        <form class="space-y-4" @submit.prevent="saveConfig">
+          <label class="flex items-center gap-2">
+            <input v-model="form.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.clandes.cfgEnabled') }}</span>
+          </label>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-700 dark:text-gray-300">{{ t('admin.clandes.cfgAddr') }}</label>
+            <input v-model="form.addr" type="text" placeholder="127.0.0.1:8082" class="input w-full" required />
+          </div>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-700 dark:text-gray-300">
+              {{ t('admin.clandes.cfgAuthToken') }}
+              <span v-if="config.auth_token_configured && !tokenTouched" class="ml-2 text-xs text-gray-500">{{ t('admin.clandes.cfgAuthTokenSet') }}</span>
+            </label>
+            <input
+              v-model="form.authToken"
+              :type="showToken ? 'text' : 'password'"
+              :placeholder="config.auth_token_configured ? t('admin.clandes.cfgAuthTokenKeep') : ''"
+              class="input w-full font-mono"
+              @input="tokenTouched = true"
+            />
+            <div class="mt-1 flex items-center gap-3 text-xs">
+              <button type="button" class="text-primary-600 hover:underline" @click="showToken = !showToken">
+                {{ showToken ? t('admin.clandes.cfgTokenHide') : t('admin.clandes.cfgTokenShow') }}
+              </button>
+              <button v-if="config.auth_token_configured" type="button" class="text-red-600 hover:underline" @click="clearToken">
+                {{ t('admin.clandes.cfgTokenClear') }}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-700 dark:text-gray-300">{{ t('admin.clandes.cfgReconnectInterval') }}</label>
+            <input v-model.number="form.reconnectInterval" type="number" min="1" max="3600" class="input w-40" required />
+            <span class="ml-2 text-xs text-gray-500">{{ t('admin.clandes.cfgSeconds') }}</span>
+          </div>
+
+          <div class="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+            {{ t('admin.clandes.cfgRestartWarning') }}
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button type="submit" class="btn btn-primary" :disabled="saving">
+              {{ saving ? t('admin.clandes.cfgRestarting') : t('admin.clandes.cfgSave') }}
+            </button>
+            <button type="button" class="btn btn-secondary" :disabled="saving" @click="resetForm">
+              {{ t('common.reset') }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { adminAPI } from '@/api'
 import { useAppStore } from '@/stores'
-import type { ClandesStatus } from '@/api/admin/clandes'
+import type { ClandesConfig, ClandesStatus } from '@/api/admin/clandes'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const status = ref<ClandesStatus | null>(null)
+const config = ref<ClandesConfig | null>(null)
 const loading = ref(false)
 const syncing = ref(false)
+const saving = ref(false)
+const showToken = ref(false)
+const tokenTouched = ref(false)
+
+const form = reactive({
+  enabled: false,
+  addr: '',
+  authToken: '',
+  reconnectInterval: 5
+})
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -97,6 +165,31 @@ async function fetchStatus() {
   }
 }
 
+async function fetchConfig() {
+  try {
+    const cfg = await adminAPI.clandes.getConfig()
+    config.value = cfg
+    resetForm()
+  } catch (e) {
+    appStore.showError((e as { message?: string })?.message ?? t('admin.clandes.loadError'))
+  }
+}
+
+function resetForm() {
+  if (!config.value) return
+  form.enabled = config.value.enabled
+  form.addr = config.value.addr
+  form.authToken = ''
+  form.reconnectInterval = config.value.reconnect_interval || 5
+  tokenTouched.value = false
+  showToken.value = false
+}
+
+function clearToken() {
+  form.authToken = ''
+  tokenTouched.value = true
+}
+
 async function doSync() {
   syncing.value = true
   try {
@@ -109,8 +202,47 @@ async function doSync() {
   }
 }
 
+async function saveConfig() {
+  if (!confirm(t('admin.clandes.cfgRestartConfirm'))) return
+  saving.value = true
+  try {
+    // auth_token: null = keep; "" = clear; else new value
+    const authToken = tokenTouched.value ? form.authToken : null
+    await adminAPI.clandes.updateConfig({
+      enabled: form.enabled,
+      addr: form.addr.trim(),
+      auth_token: authToken,
+      reconnect_interval: form.reconnectInterval
+    })
+    appStore.showSuccess(t('admin.clandes.cfgSavedRestarting'))
+    pollUntilAlive()
+  } catch (e) {
+    appStore.showError((e as { message?: string })?.message ?? t('admin.clandes.cfgSaveFailed'))
+    saving.value = false
+  }
+}
+
+function pollUntilAlive() {
+  const started = Date.now()
+  const tick = async () => {
+    try {
+      await fetchStatus()
+      await fetchConfig()
+      saving.value = false
+    } catch {
+      if (Date.now() - started < 60_000) {
+        setTimeout(tick, 2000)
+      } else {
+        saving.value = false
+      }
+    }
+  }
+  setTimeout(tick, 3000)
+}
+
 onMounted(() => {
   fetchStatus()
+  fetchConfig()
   refreshTimer = setInterval(fetchStatus, 30_000)
 })
 
