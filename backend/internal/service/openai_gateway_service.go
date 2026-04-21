@@ -2043,9 +2043,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	// 仅在 WSv2 模式保留 previous_response_id，其他模式（HTTP/WSv1）统一过滤。
-	// 注意：该规则同样适用于 Codex CLI 请求，避免 WSv1 向上游透传不支持字段。
-	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+	// 默认：仅 WSv2 保留 previous_response_id，其他模式过滤（WSv1 协议不支持；HTTP 历史保守默认）。
+	// 通过 gateway.openai_ws.preserve_previous_response_id_on_http=true 可以让 HTTP /responses 透传 previous_response_id
+	// 以获得原生 continuation 语义（issue #1769）。WSv1 因上游不识别该字段，始终过滤。
+	keepPreviousResponseID := wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 ||
+		(wsDecision.Transport == OpenAIUpstreamTransportHTTPSSE && s.openAIWSPreservePreviousResponseIDOnHTTP())
+	if !keepPreviousResponseID {
 		if _, has := reqBody["previous_response_id"]; has {
 			delete(reqBody, "previous_response_id")
 			bodyModified = true
@@ -2117,6 +2120,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		wsInvalidEncryptedContentRecoveryTried := false
 		recoverPrevResponseNotFound := func(attempt int) bool {
 			if wsPrevResponseRecoveryTried {
+				return false
+			}
+			if s.openAIWSFailCloseOnContinuationLost() || !s.openAIWSReconnectPrevResponseRecoveryEnabled() {
+				reason := "disabled_by_config"
+				if s.openAIWSFailCloseOnContinuationLost() {
+					reason = "fail_close"
+				}
+				logOpenAIWSModeInfo(
+					"reconnect_prev_response_recovery_skip account_id=%d attempt=%d reason=%s",
+					account.ID,
+					attempt,
+					reason,
+				)
 				return false
 			}
 			previousResponseID := openAIWSPayloadString(wsReqBody, "previous_response_id")

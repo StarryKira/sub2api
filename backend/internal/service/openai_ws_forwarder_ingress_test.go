@@ -79,6 +79,71 @@ func TestOpenAIWSIngressPreviousResponseRecoveryEnabled(t *testing.T) {
 	require.True(t, svc.openAIWSIngressPreviousResponseRecoveryEnabled())
 }
 
+// Issue #1769: fine-grained continuation recovery switches.
+func TestOpenAIWSIngressPreflightPingRecoveryEnabled(t *testing.T) {
+	t.Parallel()
+
+	var nilService *OpenAIGatewayService
+	require.True(t, nilService.openAIWSIngressPreflightPingRecoveryEnabled(), "nil service should default to enabled")
+
+	svcWithNilCfg := &OpenAIGatewayService{}
+	require.True(t, svcWithNilCfg.openAIWSIngressPreflightPingRecoveryEnabled(), "nil config should default to enabled")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	require.False(t, svc.openAIWSIngressPreflightPingRecoveryEnabled(), "explicit config default should be false (viper default is true)")
+
+	svc.cfg.Gateway.OpenAIWS.IngressPreflightPingRecoveryEnabled = true
+	require.True(t, svc.openAIWSIngressPreflightPingRecoveryEnabled())
+}
+
+func TestOpenAIWSReconnectPrevResponseRecoveryEnabled(t *testing.T) {
+	t.Parallel()
+
+	var nilService *OpenAIGatewayService
+	require.True(t, nilService.openAIWSReconnectPrevResponseRecoveryEnabled(), "nil service should default to enabled")
+
+	svcWithNilCfg := &OpenAIGatewayService{}
+	require.True(t, svcWithNilCfg.openAIWSReconnectPrevResponseRecoveryEnabled(), "nil config should default to enabled")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	require.False(t, svc.openAIWSReconnectPrevResponseRecoveryEnabled(), "explicit config default should be false (viper default is true)")
+
+	svc.cfg.Gateway.OpenAIWS.ReconnectPrevResponseRecoveryEnabled = true
+	require.True(t, svc.openAIWSReconnectPrevResponseRecoveryEnabled())
+}
+
+func TestOpenAIWSFailCloseOnContinuationLost(t *testing.T) {
+	t.Parallel()
+
+	var nilService *OpenAIGatewayService
+	require.False(t, nilService.openAIWSFailCloseOnContinuationLost(), "nil service should default to disabled")
+
+	svcWithNilCfg := &OpenAIGatewayService{}
+	require.False(t, svcWithNilCfg.openAIWSFailCloseOnContinuationLost(), "nil config should default to disabled")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	require.False(t, svc.openAIWSFailCloseOnContinuationLost(), "explicit config default should be false")
+
+	svc.cfg.Gateway.OpenAIWS.FailCloseOnContinuationLost = true
+	require.True(t, svc.openAIWSFailCloseOnContinuationLost())
+}
+
+func TestOpenAIWSPreservePreviousResponseIDOnHTTP(t *testing.T) {
+	t.Parallel()
+
+	var nilService *OpenAIGatewayService
+	require.False(t, nilService.openAIWSPreservePreviousResponseIDOnHTTP(), "nil service should default to disabled")
+
+	svcWithNilCfg := &OpenAIGatewayService{}
+	require.False(t, svcWithNilCfg.openAIWSPreservePreviousResponseIDOnHTTP(), "nil config should default to disabled")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	require.False(t, svc.openAIWSPreservePreviousResponseIDOnHTTP(), "explicit config default should be false")
+
+	svc.cfg.Gateway.OpenAIWS.PreservePreviousResponseIDOnHTTP = true
+	require.True(t, svc.openAIWSPreservePreviousResponseIDOnHTTP())
+}
+
 func TestDropPreviousResponseIDFromRawPayload(t *testing.T) {
 	t.Parallel()
 

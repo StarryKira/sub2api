@@ -974,6 +974,34 @@ func (s *OpenAIGatewayService) openAIWSIngressPreviousResponseRecoveryEnabled() 
 	return true
 }
 
+func (s *OpenAIGatewayService) openAIWSIngressPreflightPingRecoveryEnabled() bool {
+	if s != nil && s.cfg != nil {
+		return s.cfg.Gateway.OpenAIWS.IngressPreflightPingRecoveryEnabled
+	}
+	return true
+}
+
+func (s *OpenAIGatewayService) openAIWSReconnectPrevResponseRecoveryEnabled() bool {
+	if s != nil && s.cfg != nil {
+		return s.cfg.Gateway.OpenAIWS.ReconnectPrevResponseRecoveryEnabled
+	}
+	return true
+}
+
+func (s *OpenAIGatewayService) openAIWSFailCloseOnContinuationLost() bool {
+	if s != nil && s.cfg != nil {
+		return s.cfg.Gateway.OpenAIWS.FailCloseOnContinuationLost
+	}
+	return false
+}
+
+func (s *OpenAIGatewayService) openAIWSPreservePreviousResponseIDOnHTTP() bool {
+	if s != nil && s.cfg != nil {
+		return s.cfg.Gateway.OpenAIWS.PreservePreviousResponseIDOnHTTP
+	}
+	return false
+}
+
 func (s *OpenAIGatewayService) openAIWSReadTimeout() time.Duration {
 	if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ReadTimeoutSeconds > 0 {
 		return time.Duration(s.cfg.Gateway.OpenAIWS.ReadTimeoutSeconds) * time.Second
@@ -3043,6 +3071,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if turnPrevRecoveryTried || !s.openAIWSIngressPreviousResponseRecoveryEnabled() {
 			return false
 		}
+		if s.openAIWSFailCloseOnContinuationLost() {
+			logOpenAIWSModeInfo(
+				"ingress_ws_prev_response_recovery_skip account_id=%d turn=%d conn_id=%s reason=fail_close",
+				account.ID,
+				turn,
+				truncateOpenAIWSLogValue(connID, openAIWSIDValueMaxLen),
+			)
+			return false
+		}
 		if isStrictAffinityTurn(currentPayload) {
 			// Layer 2：严格亲和链路命中 previous_response_not_found 时，降级为“去掉 previous_response_id 后重放一次”。
 			// 该错误说明续链锚点已失效，继续 strict fail-close 只会直接中断本轮请求。
@@ -3300,7 +3337,20 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					truncateOpenAIWSLogValue(pingErr.Error(), openAIWSLogValueMaxLen),
 				)
 				if forcePreferredConn {
-					if !turnPrevRecoveryTried && currentPreviousResponseID != "" {
+					if s.openAIWSFailCloseOnContinuationLost() || !s.openAIWSIngressPreflightPingRecoveryEnabled() {
+						reason := "disabled_by_config"
+						if s.openAIWSFailCloseOnContinuationLost() {
+							reason = "fail_close"
+						}
+						logOpenAIWSModeInfo(
+							"ingress_ws_preflight_ping_recovery_skip account_id=%d turn=%d conn_id=%s reason=%s previous_response_id=%s",
+							account.ID,
+							turn,
+							truncateOpenAIWSLogValue(sessionConnID, openAIWSIDValueMaxLen),
+							normalizeOpenAIWSLogValue(reason),
+							truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
+						)
+					} else if !turnPrevRecoveryTried && currentPreviousResponseID != "" {
 						updatedPayload, removed, dropErr := dropPreviousResponseIDFromRawPayload(currentPayload)
 						if dropErr != nil || !removed {
 							reason := "not_removed"

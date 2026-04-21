@@ -496,6 +496,17 @@ type GatewayOpenAIWSConfig struct {
 	AllowStoreRecovery bool `mapstructure:"allow_store_recovery"`
 	// IngressPreviousResponseRecoveryEnabled: ingress 模式收到 previous_response_not_found 时，是否允许自动去掉 previous_response_id 重试一次（默认 true）
 	IngressPreviousResponseRecoveryEnabled bool `mapstructure:"ingress_previous_response_recovery_enabled"`
+	// IngressPreflightPingRecoveryEnabled: ingress 模式 preflight ping 失败时，是否允许去掉 previous_response_id 重放当前 turn（默认 true）。
+	// 关闭后 preflight ping 失败会直接返回 upstream continuation 不可用错误，交给客户端决定是否重试，避免静默重放导致"像重新回答"的体感。
+	IngressPreflightPingRecoveryEnabled bool `mapstructure:"ingress_preflight_ping_recovery_enabled"`
+	// ReconnectPrevResponseRecoveryEnabled: HTTP reconnect 层收到 previous_response_not_found 时，是否允许去掉 previous_response_id 重放（默认 true）。
+	ReconnectPrevResponseRecoveryEnabled bool `mapstructure:"reconnect_prev_response_recovery_enabled"`
+	// FailCloseOnContinuationLost: 总闸。为 true 时所有"去掉 previous_response_id 再重放"的恢复路径都关闭，
+	// continuation 失效会直接把错误透传给客户端（默认 false，保持旧行为）。
+	FailCloseOnContinuationLost bool `mapstructure:"fail_close_on_continuation_lost"`
+	// PreservePreviousResponseIDOnHTTP: 是否允许 HTTP /responses 路径向上游透传 previous_response_id（默认 false）。
+	// 开启后 HTTP 链路走原生 continuation 语义；WSv1 仍然过滤（协议不支持），WSv2 始终保留。
+	PreservePreviousResponseIDOnHTTP bool `mapstructure:"preserve_previous_response_id_on_http"`
 	// StoreDisabledConnMode: store=false 且无可复用会话连接时的建连策略（strict/adaptive/off）
 	// - strict: 强制新建连接（隔离优先）
 	// - adaptive: 仅在高风险失败后强制新建连接（性能与隔离折中）
@@ -1372,6 +1383,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.force_http", false)
 	viper.SetDefault("gateway.openai_ws.allow_store_recovery", false)
 	viper.SetDefault("gateway.openai_ws.ingress_previous_response_recovery_enabled", true)
+	viper.SetDefault("gateway.openai_ws.ingress_preflight_ping_recovery_enabled", true)
+	viper.SetDefault("gateway.openai_ws.reconnect_prev_response_recovery_enabled", true)
+	viper.SetDefault("gateway.openai_ws.fail_close_on_continuation_lost", false)
+	viper.SetDefault("gateway.openai_ws.preserve_previous_response_id_on_http", false)
 	viper.SetDefault("gateway.openai_ws.store_disabled_conn_mode", "strict")
 	viper.SetDefault("gateway.openai_ws.store_disabled_force_new_conn", true)
 	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", false)

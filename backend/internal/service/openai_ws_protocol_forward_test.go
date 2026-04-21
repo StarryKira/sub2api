@@ -1101,6 +1101,7 @@ func TestOpenAIGatewayService_Forward_WSv2PreviousResponseNotFoundRecoversByDrop
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.FallbackCooldownSeconds = 1
+	cfg.Gateway.OpenAIWS.ReconnectPrevResponseRecoveryEnabled = true
 
 	svc := &OpenAIGatewayService{
 		cfg:              cfg,
@@ -1396,6 +1397,7 @@ func TestOpenAIGatewayService_Forward_WSv2PreviousResponseNotFoundOnlyRecoversOn
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.FallbackCooldownSeconds = 1
+	cfg.Gateway.OpenAIWS.ReconnectPrevResponseRecoveryEnabled = true
 
 	svc := &OpenAIGatewayService{
 		cfg:              cfg,
