@@ -94,6 +94,9 @@ func RegisterAdminRoutes(
 
 		// Clandes 集成
 		registerClandesRoutes(admin, h)
+
+		// 邀请返利（专属用户管理）
+		registerAffiliateRoutes(admin, h)
 	}
 }
 
@@ -607,5 +610,20 @@ func registerClandesRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		clandes.POST("/sync", h.Admin.Clandes.SyncAccounts)
 		clandes.POST("/oauth/start", h.Admin.Clandes.StartOAuthLogin)
 		clandes.POST("/oauth/exchange", h.Admin.Clandes.CompleteOAuthLogin)
+	}
+}
+
+// registerAffiliateRoutes 注册邀请返利的管理端路由（专属用户配置）
+func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	affiliates := admin.Group("/affiliates")
+	{
+		users := affiliates.Group("/users")
+		{
+			users.GET("", h.Admin.Affiliate.ListUsers)
+			users.GET("/lookup", h.Admin.Affiliate.LookupUsers)
+			users.POST("/batch-rate", h.Admin.Affiliate.BatchSetRate)
+			users.PUT("/:user_id", h.Admin.Affiliate.UpdateUserSettings)
+			users.DELETE("/:user_id", h.Admin.Affiliate.ClearUserSettings)
+		}
 	}
 }
