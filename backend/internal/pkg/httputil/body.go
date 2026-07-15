@@ -22,6 +22,36 @@ const (
 	maxDecompressedBodySize = 64 << 20
 )
 
+// RequestBodyReadError preserves safe transport/decompression metadata for
+// structured diagnostics without exposing request body contents.
+type RequestBodyReadError struct {
+	Stage                   string
+	ContentEncoding         string
+	BytesRead               int64
+	ContentLength           int64
+	CompressedFrameComplete *bool
+	DecodedBytes            int64
+	DecodeProbeErr          error
+	Err                     error
+}
+
+func (e *RequestBodyReadError) Error() string {
+	if e == nil {
+		return "request body read failed"
+	}
+	if e.Stage == "decode" {
+		return fmt.Sprintf("decode Content-Encoding %q after %d compressed bytes: %v", e.ContentEncoding, e.BytesRead, e.Err)
+	}
+	return fmt.Sprintf("read request body after %d bytes (content length %d): %v", e.BytesRead, e.ContentLength, e.Err)
+}
+
+func (e *RequestBodyReadError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 // ReadRequestBodyWithPrealloc reads request body with preallocated buffer based
 // on content length, transparently decoding any Content-Encoding the upstream
 // client used to compress the body (zstd, gzip, deflate).
@@ -43,8 +73,23 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 	}
 
 	buf := bytes.NewBuffer(make([]byte, 0, capHint))
-	if _, err := io.Copy(buf, req.Body); err != nil {
-		return nil, err
+	bytesRead, err := io.Copy(buf, req.Body)
+	if err != nil {
+		readErr := &RequestBodyReadError{
+			Stage:           "read",
+			ContentEncoding: strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding"))),
+			BytesRead:       bytesRead,
+			ContentLength:   req.ContentLength,
+			Err:             err,
+		}
+		if readErr.ContentEncoding != "" && readErr.ContentEncoding != "identity" {
+			decoded, decodeErr := decompressRequestBody(readErr.ContentEncoding, buf.Bytes())
+			complete := decodeErr == nil
+			readErr.CompressedFrameComplete = &complete
+			readErr.DecodedBytes = int64(len(decoded))
+			readErr.DecodeProbeErr = decodeErr
+		}
+		return nil, readErr
 	}
 	raw := buf.Bytes()
 
@@ -55,7 +100,13 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 
 	decoded, err := decompressRequestBody(enc, raw)
 	if err != nil {
-		return nil, fmt.Errorf("decode Content-Encoding %q: %w", enc, err)
+		return nil, &RequestBodyReadError{
+			Stage:           "decode",
+			ContentEncoding: enc,
+			BytesRead:       int64(len(raw)),
+			ContentLength:   req.ContentLength,
+			Err:             err,
+		}
 	}
 
 	req.Header.Del("Content-Encoding")

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -110,11 +112,74 @@ func TestReadRequestBodyWithPrealloc_RejectsUnsupportedEncoding(t *testing.T) {
 }
 
 func TestReadRequestBodyWithPrealloc_RejectsCorruptZstd(t *testing.T) {
-	req := newRequestWithBody(t, []byte("not actually zstd"), "zstd")
+	raw := []byte("not actually zstd")
+	req := newRequestWithBody(t, raw, "zstd")
 	_, err := ReadRequestBodyWithPrealloc(req)
 	if err == nil {
 		t.Fatal("expected error for corrupt zstd body, got nil")
 	}
+	var readErr *RequestBodyReadError
+	if !errors.As(err, &readErr) {
+		t.Fatalf("expected RequestBodyReadError, got %T", err)
+	}
+	if readErr.Stage != "decode" || readErr.ContentEncoding != "zstd" || readErr.BytesRead != int64(len(raw)) {
+		t.Fatalf("unexpected diagnostics: %+v", readErr)
+	}
+}
+
+func TestReadRequestBodyWithPrealloc_RecordsTransportReadFailure(t *testing.T) {
+	req := newRequestWithBody(t, []byte("ignored"), "zstd")
+	req.ContentLength = 12
+	req.Body = io.NopCloser(io.MultiReader(strings.NewReader("abc"), errReader{}))
+
+	_, err := ReadRequestBodyWithPrealloc(req)
+	if err == nil {
+		t.Fatal("expected transport read error, got nil")
+	}
+	var readErr *RequestBodyReadError
+	if !errors.As(err, &readErr) {
+		t.Fatalf("expected RequestBodyReadError, got %T", err)
+	}
+	if readErr.Stage != "read" || readErr.BytesRead != 3 || readErr.ContentLength != 12 {
+		t.Fatalf("unexpected diagnostics: %+v", readErr)
+	}
+	if readErr.CompressedFrameComplete == nil || *readErr.CompressedFrameComplete {
+		t.Fatalf("expected failed compressed-frame probe, got %+v", readErr)
+	}
+	if readErr.DecodeProbeErr == nil {
+		t.Fatalf("expected compressed-frame probe error, got %+v", readErr)
+	}
+}
+
+func TestReadRequestBodyWithPrealloc_DetectsCompleteZstdFrameAfterTransportEOF(t *testing.T) {
+	enc, _ := zstd.NewWriter(nil)
+	compressed := enc.EncodeAll([]byte(samplePayload), nil)
+	_ = enc.Close()
+
+	req := newRequestWithBody(t, compressed, "zstd")
+	req.ContentLength = int64(len(compressed) + 17)
+	req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(compressed), errReader{}))
+
+	_, err := ReadRequestBodyWithPrealloc(req)
+	if err == nil {
+		t.Fatal("expected transport read error, got nil")
+	}
+	var readErr *RequestBodyReadError
+	if !errors.As(err, &readErr) {
+		t.Fatalf("expected RequestBodyReadError, got %T", err)
+	}
+	if readErr.CompressedFrameComplete == nil || !*readErr.CompressedFrameComplete {
+		t.Fatalf("expected complete compressed frame, got %+v", readErr)
+	}
+	if readErr.DecodedBytes != int64(len(samplePayload)) || readErr.DecodeProbeErr != nil {
+		t.Fatalf("unexpected compressed-frame diagnostics: %+v", readErr)
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
 }
 
 func TestReadRequestBodyWithPrealloc_NilBody(t *testing.T) {
