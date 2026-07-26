@@ -257,7 +257,8 @@ func TestPassthroughLifecycle_PreOutputUpstreamFailureRetriesOnce(t *testing.T) 
 	secondUpstream.Send(`{"type":"response.completed","response":{"id":"resp_retry","status":"completed","output":[]}}`)
 
 	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), firstUpstream)
-	dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	dialer, ok := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	require.True(t, ok)
 	dialer.conns = []openAIWSClientConn{firstUpstream, secondUpstream}
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, passthroughLifecycleAccount())
 	defer server.Close()
@@ -293,7 +294,8 @@ func TestPassthroughLifecycle_PreOutputEOFRetriesOnce(t *testing.T) {
 	secondUpstream.Send(`{"type":"response.completed","response":{"id":"resp_eof_retry","status":"completed","output":[]}}`)
 
 	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), firstUpstream)
-	dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	dialer, ok := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	require.True(t, ok)
 	dialer.conns = []openAIWSClientConn{firstUpstream, secondUpstream}
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, passthroughLifecycleAccount())
 	defer server.Close()
@@ -326,7 +328,8 @@ func TestPassthroughLifecycle_PreOutputFailureWritesResponseFailedAfterRetryExha
 	secondUpstream.Send(`{"type":"error","error":{"code":"server_error","message":"second socket failed"}}`)
 
 	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), firstUpstream)
-	dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	dialer, ok := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	require.True(t, ok)
 	dialer.conns = []openAIWSClientConn{firstUpstream, secondUpstream}
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, passthroughLifecycleAccount())
 	defer server.Close()

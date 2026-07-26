@@ -1370,6 +1370,18 @@ func isOpenAIWSPassthroughInitialRetryableRelayExit(exit *openaiwsv2.RelayExit) 
 	}
 	switch exit.Stage {
 	case "read_upstream":
+		// A first-output timeout already has a dedicated cross-account
+		// failover path. Retrying the same upstream connection here delays
+		// that path and, after the retry budget is spent, closes the client
+		// with 1011 instead of allowing the handler to select the next account.
+		var firstOutputTimeoutErr *openAIWSPassthroughFirstOutputTimeoutError
+		if errors.As(exit.Err, &firstOutputTimeoutErr) {
+			return false
+		}
+		var activeTurnTimeoutErr *openAIWSPassthroughActiveTurnTimeoutError
+		if errors.As(exit.Err, &activeTurnTimeoutErr) {
+			return false
+		}
 		return true
 	case "upstream_message":
 		var preOutputErr *openAIWSPassthroughPreOutputUpstreamError
