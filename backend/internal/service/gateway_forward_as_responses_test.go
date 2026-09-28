@@ -453,7 +453,7 @@ func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `response.completed`)
 }
 
-func TestOpus55ResponsesSignedThinkingBufferedAndStreamed(t *testing.T) {
+func TestClaude55ResponsesSignedThinkingBufferedAndStreamed(t *testing.T) {
 	payload := strings.Join([]string{
 		"event: message_start\n" + `data: {"type":"message_start","message":{"id":"msg_1","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":10}}}`,
 		"event: content_block_start\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
@@ -465,60 +465,65 @@ func TestOpus55ResponsesSignedThinkingBufferedAndStreamed(t *testing.T) {
 		"event: message_delta\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 		"event: message_stop\n" + `data: {"type":"message_stop"}`,
 	}, "\n\n") + "\n\n"
-	for _, stream := range []bool{false, true} {
-		rec := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(rec)
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-		resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(payload))}
-		svc := &GatewayService{}
-		var err error
-		if stream {
-			_, err = svc.handleResponsesStreamingResponse(resp, c, "public-opus", "claude-opus-5-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-		} else {
-			_, err = svc.handleResponsesBufferedStreamingResponse(resp, c, "public-opus", "claude-opus-5-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5"} {
+		modelPayload := strings.ReplaceAll(payload, "claude-opus-5-5", model)
+		for _, stream := range []bool{false, true} {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(modelPayload))}
+			svc := &GatewayService{}
+			var err error
+			if stream {
+				_, err = svc.handleResponsesStreamingResponse(resp, c, "public-claude", model, nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			} else {
+				_, err = svc.handleResponsesBufferedStreamingResponse(resp, c, "public-claude", model, nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			}
+			require.NoError(t, err)
+			require.Contains(t, rec.Body.String(), "anthropic-thinking-v1:")
+			require.Contains(t, rec.Body.String(), "public-claude")
+			require.Contains(t, rec.Body.String(), `"text":"ok"`)
 		}
-		require.NoError(t, err)
-		require.Contains(t, rec.Body.String(), "anthropic-thinking-v1:")
-		require.Contains(t, rec.Body.String(), "public-opus")
-		require.Contains(t, rec.Body.String(), `"text":"ok"`)
 	}
 }
 
-func TestOpus55BridgeUsesMappedModelBeforeThinkingConversion(t *testing.T) {
-	for _, chat := range []bool{false, true} {
-		for _, forced := range []bool{false, true} {
-			rec := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(rec)
-			body := `{"model":"public-opus","input":"hello","reasoning":{"effort":"xhigh"}}`
-			if chat {
-				body = `{"model":"public-opus","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"xhigh"}`
-			}
-			if forced {
-				body = body[:len(body)-1] + `,"tool_choice":"required","tools":[{"type":"function","name":"lookup","function":{"name":"lookup"}}]}`
-			}
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
-			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(namespaceToolAnthropicStream()))}}
-			svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-			account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture-key", "model_mapping": map[string]any{"public-opus": "claude-opus-5-5"}}}
-			var err error
-			var result *ForwardResult
-			if chat {
-				result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(body), nil)
-			} else {
-				result, err = svc.ForwardAsResponses(context.Background(), c, account, []byte(body), nil)
-			}
-			if forced {
-				require.Error(t, err)
-				require.Equal(t, 400, rec.Code)
-				require.Nil(t, upstream.lastReq)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, result)
-				require.NotNil(t, upstream.lastReq)
-				require.Equal(t, "claude-opus-5-5", gjson.GetBytes(upstream.lastBody, "model").String())
-				require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
-				require.Equal(t, "xhigh", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
-				require.False(t, gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Exists())
+func TestClaude55BridgeUsesMappedModelBeforeThinkingConversion(t *testing.T) {
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5"} {
+		for _, chat := range []bool{false, true} {
+			for _, forced := range []bool{false, true} {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				body := `{"model":"public-claude","input":"hello","reasoning":{"effort":"xhigh"}}`
+				if chat {
+					body = `{"model":"public-claude","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"xhigh"}`
+				}
+				if forced {
+					body = body[:len(body)-1] + `,"tool_choice":"required","tools":[{"type":"function","name":"lookup","function":{"name":"lookup"}}]}`
+				}
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+				upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(namespaceToolAnthropicStream()))}}
+				svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+				account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture-key", "model_mapping": map[string]any{"public-claude": model}}}
+				var err error
+				var result *ForwardResult
+				if chat {
+					result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(body), nil)
+				} else {
+					result, err = svc.ForwardAsResponses(context.Background(), c, account, []byte(body), nil)
+				}
+				if forced {
+					require.Error(t, err)
+					require.Equal(t, 400, rec.Code)
+					require.Nil(t, upstream.lastReq)
+				} else {
+					require.NoError(t, err)
+					require.NotNil(t, result)
+					require.NotNil(t, upstream.lastReq)
+					require.Equal(t, model, gjson.GetBytes(upstream.lastBody, "model").String())
+					require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+					require.Equal(t, "xhigh", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
+					require.False(t, gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Exists())
+				}
 			}
 		}
 	}
